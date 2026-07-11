@@ -94,6 +94,8 @@ class DashboardStats(BaseModel):
     scene_ratio_ok: bool
     scene_min_count: int
     scene_max_count: int
+    scene_covered_count: int
+    scene_total_count: int = 13
 
 
 class UserStatsItem(BaseModel):

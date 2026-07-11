@@ -65,6 +65,8 @@ export interface DashboardStats {
   scene_ratio_ok: boolean;
   scene_min_count: number;
   scene_max_count: number;
+  scene_covered_count: number;
+  scene_total_count: number;
 }
 
 export async function login(username: string, password: string) {

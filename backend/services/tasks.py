@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from backend.constants import SCENE_OPTIONS
 from backend.models import Sample, Submission, Task, User
 from backend.schemas import DashboardStats, TaskDetail, TaskListItem, UserStatsItem
 
@@ -84,6 +85,13 @@ def delete_task(db: Session, task: Task) -> None:
     db.commit()
 
 
+# 甲方验收比例：来源 openclaw:hermes ≈ 6:4，模型 opus 4.8 ≥ 70%，场景 13 类各 ≥1 且 max/min < 5
+SOURCE_OPENCLAW_RATIO_MIN = 0.55
+SOURCE_OPENCLAW_RATIO_MAX = 0.65
+MODEL_OPUS48_RATIO_MIN = 0.70
+SCENE_RATIO_MAX = 5
+
+
 def get_dashboard_stats(db: Session) -> DashboardStats:
     passed_count = db.query(func.count(Sample.id)).scalar() or 0
     claimed_count = db.query(func.count(Task.id)).filter(Task.status == "claimed").scalar() or 0
@@ -92,23 +100,36 @@ def get_dashboard_stats(db: Session) -> DashboardStats:
     samples = db.query(Sample).all()
     source_distribution = Counter(s.source_type for s in samples)
     model_distribution = Counter(s.model_version for s in samples)
-    scene_distribution = Counter(s.scene for s in samples)
+    scene_counts_raw = Counter(s.scene for s in samples)
     difficulty_distribution = Counter(s.difficulty or "unknown" for s in samples)
 
-    scene_counts = list(scene_distribution.values())
-    scene_min = min(scene_counts) if scene_counts else 0
-    scene_max = max(scene_counts) if scene_counts else 0
-    scene_ratio_ok = scene_min > 0 and (scene_max / scene_min < 5 if scene_min else False)
+    # 13 类场景全部纳入统计（无样本记为 0）
+    scene_distribution = {
+        label: scene_counts_raw.get(code, 0) for code, label in SCENE_OPTIONS
+    }
+    scene_count_values = list(scene_distribution.values())
+    scene_min = min(scene_count_values)
+    scene_max = max(scene_count_values)
+    scene_covered_count = sum(1 for count in scene_count_values if count > 0)
+    scene_total_count = len(SCENE_OPTIONS)
+    scene_ratio_ok = (
+        scene_min >= 1
+        and scene_max / scene_min < SCENE_RATIO_MAX
+    )
 
     openclaw = source_distribution.get("openclaw", 0)
     hermes = source_distribution.get("hermes", 0)
     total_source = openclaw + hermes
-    source_ratio_ok = total_source > 0 and (openclaw / total_source >= 0.5)
+    openclaw_ratio = openclaw / total_source if total_source else 0.0
+    source_ratio_ok = (
+        total_source > 0
+        and SOURCE_OPENCLAW_RATIO_MIN <= openclaw_ratio <= SOURCE_OPENCLAW_RATIO_MAX
+    )
 
     opus48 = model_distribution.get("opus-4.8", 0)
     opus46 = model_distribution.get("opus-4.6", 0)
     total_model = opus48 + opus46
-    model_ratio_ok = total_model > 0 and (opus48 / total_model >= 0.7)
+    model_ratio_ok = total_model > 0 and (opus48 / total_model >= MODEL_OPUS48_RATIO_MIN)
 
     return DashboardStats(
         passed_count=passed_count,
@@ -116,13 +137,15 @@ def get_dashboard_stats(db: Session) -> DashboardStats:
         available_count=available_count,
         source_distribution=dict(source_distribution),
         model_distribution=dict(model_distribution),
-        scene_distribution=dict(scene_distribution),
+        scene_distribution=scene_distribution,
         difficulty_distribution=dict(difficulty_distribution),
         source_ratio_ok=source_ratio_ok,
         model_ratio_ok=model_ratio_ok,
         scene_ratio_ok=scene_ratio_ok,
         scene_min_count=scene_min,
         scene_max_count=scene_max,
+        scene_covered_count=scene_covered_count,
+        scene_total_count=scene_total_count,
     )
 
 
