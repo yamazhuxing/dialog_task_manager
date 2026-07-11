@@ -30,7 +30,8 @@ def _run_script(settings: Settings, script: str, args: list[str]) -> None:
 
 
 def _read_report_stats(pass_session_dir: Path) -> dict:
-    report_dir = pass_session_dir.parent.parent / f"{pass_session_dir.parent.name.replace('-pass', '')}-report"
+    qc_root = pass_session_dir.parent
+    report_dir = qc_root / f"{pass_session_dir.parent.name.replace('-pass', '')}-report"
     report_file = report_dir / "report.txt"
     stats = {}
     if report_file.exists():
@@ -124,7 +125,7 @@ def run_openclaw_pipeline(settings: Settings, uploaded_file: Path, work_dir: Pat
         "justification": justification,
         "qc_stats": qc_stats,
         "convert_dir": convert_dir,
-        "qc_root": pass_dir.parent.parent,
+        "qc_root": pass_dir.parent,
         "pass_session_dir": pass_session_dir,
     }
 
@@ -197,8 +198,11 @@ def persist_passed_sample(
     shutil.copytree(result["convert_dir"] / session_id, convert_session_master)
     shutil.copytree(result["pass_session_dir"], pass_session_master)
 
-    write_sample_metadata(convert_session_master, metadata)
+    # 场景元数据仅写入 pass 目录（待质检数据目录保持纯转换结果）
     write_sample_metadata(pass_session_master, metadata)
+    convert_metadata = convert_session_master / SAMPLE_METADATA_FILENAME
+    if convert_metadata.exists():
+        convert_metadata.unlink()
 
     if backup_root.exists():
         shutil.rmtree(backup_root)

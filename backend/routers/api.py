@@ -26,6 +26,7 @@ from backend.schemas import (
 )
 from backend.services.pipeline import (
     PipelineError,
+    SAMPLE_METADATA_FILENAME,
     build_sample_metadata,
     persist_passed_sample,
     run_openclaw_pipeline,
@@ -411,8 +412,9 @@ def backfill_sample_metadata(
             write_sample_metadata(pass_session_dir, metadata)
             wrote = True
         if convert_session_dir.is_dir():
-            write_sample_metadata(convert_session_dir, metadata)
-            wrote = True
+            convert_metadata = convert_session_dir / SAMPLE_METADATA_FILENAME
+            if convert_metadata.exists():
+                convert_metadata.unlink()
         if wrote:
             backfilled += 1
     return MetadataBackfillResponse(backfilled_count=backfilled)

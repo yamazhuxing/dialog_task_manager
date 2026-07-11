@@ -425,7 +425,9 @@ export function AdminPage() {
 
       <div className="card space-y-4">
         <h2 className="font-medium">交付物下载</h2>
-        <p className="text-sm text-slate-400">打包已通过样本的「待质检数据」和「质检结果」目录（含各 session 的 sample_metadata.json）</p>
+        <p className="text-sm text-slate-400">
+          打包已通过样本的「待质检数据」和「质检结果」目录（含 report 与各 pass session 的 sample_metadata.json）
+        </p>
         <div className="flex flex-wrap gap-2">
           <button className="btn btn-secondary" onClick={onBackfillMetadata} disabled={backfilling}>
             {backfilling ? "补写中..." : "补写场景元数据"}
