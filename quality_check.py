@@ -573,6 +573,10 @@ def main():
     
     print(f"\n[质检报告] 已生成 {report_path}")
     
+    pass_count = sum(1 for r in results if r["status"] == "pass")
+    fail_count = sum(1 for r in results if r["status"] == "fail")
+    error_count = sum(1 for r in results if r["status"] == "error")
+
     # 打印控制台汇总
     print(f"\n{'=' * 60}")
     print(f"质检完成")
