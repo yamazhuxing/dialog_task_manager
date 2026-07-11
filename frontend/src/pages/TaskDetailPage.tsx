@@ -22,6 +22,7 @@ export function TaskDetailPage() {
   const [file, setFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
   const [pollingId, setPollingId] = useState<number | null>(null);
+  const [copiedRound, setCopiedRound] = useState<number | null>(null);
 
   const load = () => fetchTask(taskId).then(setTask).catch(console.error);
 
@@ -85,6 +86,25 @@ export function TaskDetailPage() {
     }
   };
 
+  const onCopyTurn = async (round: number, text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      const textarea = document.createElement("textarea");
+      textarea.value = text;
+      textarea.style.position = "fixed";
+      textarea.style.opacity = "0";
+      document.body.appendChild(textarea);
+      textarea.select();
+      document.execCommand("copy");
+      document.body.removeChild(textarea);
+    }
+    setCopiedRound(round);
+    window.setTimeout(() => {
+      setCopiedRound((current) => (current === round ? null : current));
+    }, 2000);
+  };
+
   return (
     <div className="space-y-6">
       <Link to="/tasks" className="text-sm text-cyan-300">
@@ -121,7 +141,16 @@ export function TaskDetailPage() {
         <div className="mt-4 space-y-4">
           {task.turns.map((turn) => (
             <div key={turn.round} className="rounded-xl border border-white/10 bg-black/20 p-4">
-              <div className="mb-2 text-sm text-cyan-300">第 {turn.round} 轮</div>
+              <div className="mb-2 flex items-center justify-between gap-3">
+                <div className="text-sm text-cyan-300">第 {turn.round} 轮</div>
+                <button
+                  type="button"
+                  className="btn btn-secondary shrink-0 px-3 py-1 text-xs"
+                  onClick={() => onCopyTurn(turn.round, turn.content)}
+                >
+                  {copiedRound === turn.round ? "已复制" : "复制"}
+                </button>
+              </div>
               <div className="whitespace-pre-wrap text-sm leading-6">{turn.content}</div>
             </div>
           ))}
