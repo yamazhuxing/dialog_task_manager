@@ -48,6 +48,9 @@ ADMIN_PASSWORD=admin123
 
 DEEPSEEK_API_KEY=sk-xxx
 DEEPSEEK_API_BASE=https://api.deepseek.com
+
+# 后端端口，默认 8000；若被占用可改为 8005
+APP_PORT=8005
 ```
 
 ### 3. 启动服务
@@ -106,7 +109,7 @@ After=network.target
 User=www-data
 WorkingDirectory=/opt/make_sample_service
 EnvironmentFile=/opt/make_sample_service/.env
-ExecStart=/opt/make_sample_service/.venv/bin/uvicorn backend.app:app --host 0.0.0.0 --port 8000
+ExecStart=/opt/make_sample_service/.venv/bin/uvicorn backend.app:app --host 0.0.0.0 --port 8005
 Restart=always
 
 [Install]
@@ -121,7 +124,7 @@ server {
     server_name your-domain.com;
 
     location / {
-        proxy_pass http://127.0.0.1:8000;
+        proxy_pass http://127.0.0.1:8005;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         client_max_body_size 100M;

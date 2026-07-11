@@ -21,6 +21,8 @@ class Settings(BaseSettings):
     deepseek_api_key: str = ""
     deepseek_api_base: str = "https://api.deepseek.com"
 
+    app_port: int = 8000
+
     access_token_expire_minutes: int = 60 * 24
 
     @property
