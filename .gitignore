@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+.venv
+
+# Environment
+.env
+.env.local
+
+# Data & uploads (keep structure, ignore runtime files)
+data/uploads/**
+data/samples/**
+data/backups/**
+!data/uploads/.gitkeep
+!data/samples/.gitkeep
+!data/backups/.gitkeep
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+static/
+
+# IDE
+.idea/
+.vscode/
+
+# Delivery artifacts
+*.zip
+
+# Local pipeline output (keep sample/openclaw raw input as demo)
+sample/openclaw-待质检数据/
+sample/openclaw-待质检数据-质检结果/
+data/processing/

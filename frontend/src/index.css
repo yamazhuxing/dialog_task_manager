@@ -1,0 +1,73 @@
+@import "tailwindcss";
+
+:root {
+  font-family: Inter, "Segoe UI", system-ui, sans-serif;
+  --background: 222 47% 7%;
+  --foreground: 210 40% 96%;
+  --card: 222 35% 12%;
+  --primary: 193 100% 43%;
+  --muted: 215 20% 20%;
+  --muted-foreground: 215 15% 65%;
+  --border: 215 25% 22%;
+  --success: 152 69% 40%;
+  --danger: 0 90% 55%;
+  --warning: 37 92% 50%;
+  color-scheme: dark;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: hsl(var(--background));
+  color: hsl(var(--foreground));
+}
+
+.card {
+  @apply rounded-2xl border border-white/10 bg-[hsl(var(--card)/0.85)] p-5 shadow-lg backdrop-blur;
+}
+
+.btn {
+  @apply inline-flex items-center justify-center rounded-xl px-4 py-2 text-sm font-medium transition;
+}
+
+.btn-primary {
+  @apply bg-cyan-500 text-slate-950 hover:bg-cyan-400;
+}
+
+.btn-secondary {
+  @apply border border-white/10 bg-white/5 hover:bg-white/10;
+}
+
+.btn-danger {
+  @apply bg-red-500/90 text-white hover:bg-red-500;
+}
+
+.input, .select, .textarea {
+  @apply w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-100 outline-none focus:border-cyan-400;
+  color-scheme: dark;
+}
+
+.textarea {
+  @apply leading-6;
+}
+
+.select option {
+  background-color: hsl(var(--card));
+  color: hsl(var(--foreground));
+}
+
+.badge {
+  @apply inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium;
+}
+
+.badge-available { @apply bg-emerald-500/20 text-emerald-300; }
+.badge-claimed { @apply bg-amber-500/20 text-amber-300; }
+.badge-passed { @apply bg-cyan-500/20 text-cyan-300; }
+
+.file-drop {
+  @apply flex cursor-pointer flex-col items-center justify-center rounded-xl border border-dashed border-white/15 bg-white/[0.03] px-4 py-8 text-center transition hover:border-cyan-400/40 hover:bg-cyan-500/5;
+}
+
+.file-drop-active {
+  @apply border-cyan-400/60 bg-cyan-500/10;
+}
