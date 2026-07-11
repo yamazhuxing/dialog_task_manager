@@ -83,6 +83,7 @@ class Sample(Base):
     scene: Mapped[str] = mapped_column(String(64), index=True)
     session_id: Mapped[str] = mapped_column(String(64), index=True)
     difficulty: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    assistant_turns: Mapped[int | None] = mapped_column(Integer, nullable=True)
     raw_file_path: Mapped[str] = mapped_column(String(512))
     convert_dir: Mapped[str] = mapped_column(String(512))
     qc_dir: Mapped[str] = mapped_column(String(512))

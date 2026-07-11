@@ -29,6 +29,7 @@ from backend.services.pipeline import (
     persist_passed_sample,
     run_openclaw_pipeline,
 )
+from backend.services.assistant_turns import turns_from_qc_stats
 from backend.services.qc_hints import build_qc_hints
 from backend.services.submission_progress import (
     append_processing_log,
@@ -276,6 +277,7 @@ def _process_submission(submission_id: int) -> None:
                 scene=task.scene,
                 session_id=result["session_id"],
                 difficulty=result["difficulty"],
+                assistant_turns=turns_from_qc_stats(result.get("qc_stats")),
                 raw_file_path=str(paths["raw_file"]),
                 convert_dir=str(paths["convert_dir"]),
                 qc_dir=str(paths["qc_dir"]),

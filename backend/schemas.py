@@ -117,10 +117,12 @@ class DashboardStats(BaseModel):
     scene_total_count: int = 13
     scene_range_ratio: float | None = None
     assistant_turns_distribution: dict[str, int] = {}
+    assistant_turns_buckets: dict[str, int] = {}
     assistant_turns_min: int | None = None
     assistant_turns_max: int | None = None
     assistant_turns_avg: float | None = None
-    assistant_turns_known_count: int = 0
+    assistant_turns_sample_count: int = 0
+    assistant_turns_missing_count: int = 0
 
 
 class UserStatsItem(BaseModel):

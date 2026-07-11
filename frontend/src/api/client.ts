@@ -69,10 +69,12 @@ export interface DashboardStats {
   scene_total_count: number;
   scene_range_ratio: number | null;
   assistant_turns_distribution: Record<string, number>;
+  assistant_turns_buckets: Record<string, number>;
   assistant_turns_min: number | null;
   assistant_turns_max: number | null;
   assistant_turns_avg: number | null;
-  assistant_turns_known_count: number;
+  assistant_turns_sample_count: number;
+  assistant_turns_missing_count: number;
 }
 
 export async function login(username: string, password: string) {

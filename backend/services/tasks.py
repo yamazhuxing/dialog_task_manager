@@ -8,6 +8,11 @@ from sqlalchemy.orm import Session
 from backend.constants import SCENE_OPTIONS
 from backend.models import Sample, Submission, Task, User
 from backend.schemas import DashboardStats, TaskDetail, TaskListItem, UserStatsItem
+from backend.services.assistant_turns import (
+    TURN_BUCKETS,
+    build_turn_bucket_distribution,
+    resolve_assistant_turns,
+)
 
 
 def task_to_list_item(task: Task) -> TaskListItem:
@@ -90,25 +95,6 @@ SOURCE_OPENCLAW_RATIO_MIN = 0.55
 SOURCE_OPENCLAW_RATIO_MAX = 0.65
 MODEL_OPUS48_RATIO_MIN = 0.70
 SCENE_RATIO_MAX = 5
-ASSISTANT_TURNS_MIN = 5
-
-
-def _parse_assistant_turns(qc_stats_json: str | None) -> int | None:
-    if not qc_stats_json:
-        return None
-    try:
-        stats = json.loads(qc_stats_json)
-    except json.JSONDecodeError:
-        return None
-    if not isinstance(stats, dict):
-        return None
-    raw = stats.get("assistant_turns", stats.get("turns"))
-    if raw is None:
-        return None
-    try:
-        return int(float(str(raw).replace("%", "").strip()))
-    except (TypeError, ValueError):
-        return None
 
 
 def get_dashboard_stats(db: Session) -> DashboardStats:
@@ -151,22 +137,34 @@ def get_dashboard_stats(db: Session) -> DashboardStats:
     total_model = opus48 + opus46
     model_ratio_ok = total_model > 0 and (opus48 / total_model >= MODEL_OPUS48_RATIO_MIN)
 
-    turn_rows = (
-        db.query(Submission.qc_stats_json)
-        .join(Sample, Sample.submission_id == Submission.id)
+    sample_rows = (
+        db.query(Sample, Submission)
+        .outerjoin(Submission, Sample.submission_id == Submission.id)
         .all()
     )
     turn_counts: list[int] = []
-    for (qc_stats_json,) in turn_rows:
-        turns = _parse_assistant_turns(qc_stats_json)
-        if turns is not None:
-            turn_counts.append(turns)
+    backfill_needed = False
+    for sample, submission in sample_rows:
+        turns = resolve_assistant_turns(sample, submission)
+        if turns is None:
+            continue
+        turn_counts.append(turns)
+        if sample.assistant_turns is None:
+            sample.assistant_turns = turns
+            backfill_needed = True
+    if backfill_needed:
+        db.commit()
 
     assistant_turns_distribution = dict(Counter(str(n) for n in turn_counts))
+    assistant_turns_buckets = {
+        label: build_turn_bucket_distribution(turn_counts).get(key, 0)
+        for key, label in TURN_BUCKETS
+    }
     assistant_turns_min = min(turn_counts) if turn_counts else None
     assistant_turns_max = max(turn_counts) if turn_counts else None
     assistant_turns_avg = round(sum(turn_counts) / len(turn_counts), 1) if turn_counts else None
-    assistant_turns_known_count = len(turn_counts)
+    assistant_turns_sample_count = len(turn_counts)
+    assistant_turns_missing_count = passed_count - assistant_turns_sample_count
 
     return DashboardStats(
         passed_count=passed_count,
@@ -185,10 +183,12 @@ def get_dashboard_stats(db: Session) -> DashboardStats:
         scene_total_count=scene_total_count,
         scene_range_ratio=scene_range_ratio,
         assistant_turns_distribution=assistant_turns_distribution,
+        assistant_turns_buckets=assistant_turns_buckets,
         assistant_turns_min=assistant_turns_min,
         assistant_turns_max=assistant_turns_max,
         assistant_turns_avg=assistant_turns_avg,
-        assistant_turns_known_count=assistant_turns_known_count,
+        assistant_turns_sample_count=assistant_turns_sample_count,
+        assistant_turns_missing_count=assistant_turns_missing_count,
     )
 
 

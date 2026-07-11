@@ -40,10 +40,27 @@ def _ensure_submission_columns() -> None:
     logger.info("Migrated submissions table with new columns")
 
 
+def _ensure_sample_columns() -> None:
+    inspector = inspect(engine)
+    if "samples" not in inspector.get_table_names():
+        return
+    existing = {col["name"] for col in inspector.get_columns("samples")}
+    statements = []
+    if "assistant_turns" not in existing:
+        statements.append("ALTER TABLE samples ADD COLUMN assistant_turns INT NULL")
+    if not statements:
+        return
+    with engine.begin() as conn:
+        for sql in statements:
+            conn.execute(text(sql))
+    logger.info("Migrated samples table with new columns")
+
+
 def _ensure_admin_and_questions() -> None:
     settings = get_settings()
     Base.metadata.create_all(bind=engine)
     _ensure_submission_columns()
+    _ensure_sample_columns()
     db: Session = SessionLocal()
     try:
         admin = db.query(User).filter(User.username == settings.admin_username).first()
