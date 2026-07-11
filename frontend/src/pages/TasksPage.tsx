@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { TaskItem, claimTask, fetchTasks } from "../api/client";
+import { SceneOption, TaskItem, claimTask, fetchScenes, fetchTasks } from "../api/client";
 
 function StatusBadge({ status }: { status: string }) {
   const cls =
@@ -16,6 +16,7 @@ function StatusBadge({ status }: { status: string }) {
 
 export function TasksPage() {
   const [tasks, setTasks] = useState<TaskItem[]>([]);
+  const [scenes, setScenes] = useState<SceneOption[]>([]);
   const [statusFilter, setStatusFilter] = useState("available");
   const [sceneFilter, setSceneFilter] = useState("");
   const [message, setMessage] = useState("");
@@ -33,6 +34,10 @@ export function TasksPage() {
     load();
   }, [statusFilter, sceneFilter]);
 
+  useEffect(() => {
+    fetchScenes().then(setScenes).catch(console.error);
+  }, []);
+
   const onClaim = async (id: number) => {
     try {
       await claimTask(id);
@@ -43,8 +48,6 @@ export function TasksPage() {
       setMessage(msg || "领取失败");
     }
   };
-
-  const scenes = Array.from(new Set(tasks.map((t) => t.scene)));
 
   return (
     <div className="space-y-6">
@@ -63,8 +66,8 @@ export function TasksPage() {
         <select className="select max-w-xs" value={sceneFilter} onChange={(e) => setSceneFilter(e.target.value)}>
           <option value="">全部场景</option>
           {scenes.map((scene) => (
-            <option key={scene} value={scene}>
-              {scene}
+            <option key={scene.value} value={scene.value}>
+              {scene.label}
             </option>
           ))}
         </select>
