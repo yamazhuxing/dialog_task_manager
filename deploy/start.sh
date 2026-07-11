@@ -1,15 +1,14 @@
 #!/usr/bin/env bash
-# Production entrypoint: reads APP_PORT from .env, runs uvicorn without reload.
+# Production entrypoint: reads APP_PORT from env or .env, runs uvicorn without reload.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-if [[ -f .env ]]; then
-  set -a
-  # shellcheck disable=SC1091
-  source .env
-  set +a
+# Prefer env injected by systemd (EnvironmentFile). Manual runs read APP_PORT only —
+# do NOT `source .env` (CRLF and special chars in passwords break bash).
+if [[ -z "${APP_PORT:-}" && -f .env ]]; then
+  APP_PORT="$(grep -E '^APP_PORT=' .env | head -1 | cut -d= -f2- | tr -d '\r\n' | xargs)"
 fi
 
 PORT="${APP_PORT:-8005}"

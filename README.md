@@ -176,6 +176,14 @@ sudo systemctl status dialog-task-manager
 
 若 `.env` 中密码含 `&`、`$` 等特殊字符，请用引号包裹，例如：`DB_PASSWORD='slover_123&'`。
 
+**`.env` 必须是 Unix 换行（LF）**。从 Windows 复制到 Linux 后若日志出现 `.env: line N: $'\r': command not found`：
+
+```bash
+sed -i 's/\r$//' .env
+sed -i 's/\r$//' deploy/start.sh
+sudo systemctl restart dialog-task-manager
+```
+
 ### 4. Nginx 反向代理（可选）
 
 ```nginx
