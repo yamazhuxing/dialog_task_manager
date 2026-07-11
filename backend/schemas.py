@@ -128,8 +128,11 @@ class DashboardStats(BaseModel):
 class UserStatsItem(BaseModel):
     user_id: int
     username: str
+    role: str
     claimed_count: int
+    in_progress_count: int
     submitted_count: int
+    failed_count: int
     passed_count: int
 
 

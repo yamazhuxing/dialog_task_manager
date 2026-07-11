@@ -13,9 +13,16 @@ import {
 interface UserStat {
   user_id: number;
   username: string;
+  role: string;
   claimed_count: number;
+  in_progress_count: number;
   submitted_count: number;
+  failed_count: number;
   passed_count: number;
+}
+
+function loadUserStats(setUserStats: (stats: UserStat[]) => void) {
+  fetchUserStats().then(setUserStats).catch(console.error);
 }
 
 const MIN_TURNS = 5;
@@ -48,7 +55,7 @@ export function AdminPage() {
   const [deletingTask, setDeletingTask] = useState(false);
 
   useEffect(() => {
-    fetchUserStats().then(setUserStats).catch(console.error);
+    loadUserStats(setUserStats);
     fetchScenes()
       .then((items) => {
         setScenes(items);
@@ -99,6 +106,7 @@ export function AdminPage() {
       setMessage(`用户 ${username} 创建成功`);
       setUsername("");
       setPassword("");
+      loadUserStats(setUserStats);
     } catch (err: unknown) {
       const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
       setMessage(msg || "创建失败");
@@ -200,6 +208,76 @@ export function AdminPage() {
       </div>
 
       {message && <div className="rounded-xl bg-cyan-500/10 px-4 py-3 text-sm text-cyan-200">{message}</div>}
+
+      <div className="card space-y-4">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 className="font-medium">用户任务统计</h2>
+            <p className="mt-1 text-sm text-slate-400">
+              各账号领取、提交、通过情况（含管理员）
+            </p>
+          </div>
+          <button className="btn btn-secondary px-3 py-1 text-xs" onClick={() => loadUserStats(setUserStats)}>
+            刷新
+          </button>
+        </div>
+        <div className="overflow-x-auto rounded-xl border border-white/10">
+          <table className="w-full min-w-[640px] text-left text-sm">
+            <thead className="bg-white/5 text-xs text-slate-400">
+              <tr>
+                <th className="px-3 py-2 font-medium">用户</th>
+                <th className="px-3 py-2 font-medium">角色</th>
+                <th className="px-3 py-2 font-medium">领取/占用</th>
+                <th className="px-3 py-2 font-medium">制作中</th>
+                <th className="px-3 py-2 font-medium">提交</th>
+                <th className="px-3 py-2 font-medium">未通过</th>
+                <th className="px-3 py-2 font-medium">已通过</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-white/5">
+              {userStats.map((item) => (
+                <tr key={item.user_id}>
+                  <td className="px-3 py-2 font-medium">{item.username}</td>
+                  <td className="px-3 py-2">
+                    <span
+                      className={`badge ${item.role === "admin" ? "bg-violet-500/20 text-violet-300" : "badge-claimed"}`}
+                    >
+                      {item.role === "admin" ? "管理员" : "制作员"}
+                    </span>
+                  </td>
+                  <td className="px-3 py-2">{item.claimed_count}</td>
+                  <td className="px-3 py-2 text-amber-300">{item.in_progress_count}</td>
+                  <td className="px-3 py-2">{item.submitted_count}</td>
+                  <td className="px-3 py-2 text-red-300">{item.failed_count}</td>
+                  <td className="px-3 py-2 text-cyan-300">{item.passed_count}</td>
+                </tr>
+              ))}
+              {userStats.length > 0 && (
+                <tr className="bg-white/[0.03] text-slate-300">
+                  <td className="px-3 py-2 font-medium" colSpan={2}>
+                    合计（{userStats.length} 人）
+                  </td>
+                  <td className="px-3 py-2">{userStats.reduce((s, u) => s + u.claimed_count, 0)}</td>
+                  <td className="px-3 py-2">{userStats.reduce((s, u) => s + u.in_progress_count, 0)}</td>
+                  <td className="px-3 py-2">{userStats.reduce((s, u) => s + u.submitted_count, 0)}</td>
+                  <td className="px-3 py-2">{userStats.reduce((s, u) => s + u.failed_count, 0)}</td>
+                  <td className="px-3 py-2">{userStats.reduce((s, u) => s + u.passed_count, 0)}</td>
+                </tr>
+              )}
+              {userStats.length === 0 && (
+                <tr>
+                  <td colSpan={7} className="px-3 py-6 text-center text-slate-500">
+                    暂无用户数据
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+        <p className="text-xs text-slate-500">
+          领取/占用 = 当前占用或已完成的任务数；制作中 = 已领取但未通过；提交 = 上传次数（含失败重试）
+        </p>
+      </div>
 
       <div className="card space-y-4">
         <h2 className="font-medium">创建用户</h2>
@@ -372,39 +450,6 @@ export function AdminPage() {
             </div>
           </div>
         )}
-      </div>
-
-      <div className="card space-y-4">
-        <h2 className="font-medium">用户完成明细</h2>
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-sm">
-            <thead className="text-slate-400">
-              <tr>
-                <th className="py-2">用户</th>
-                <th>领取数</th>
-                <th>提交数</th>
-                <th>通过数</th>
-              </tr>
-            </thead>
-            <tbody>
-              {userStats.map((item) => (
-                <tr key={item.user_id} className="border-t border-white/10">
-                  <td className="py-2">{item.username}</td>
-                  <td>{item.claimed_count}</td>
-                  <td>{item.submitted_count}</td>
-                  <td>{item.passed_count}</td>
-                </tr>
-              ))}
-              {userStats.length === 0 && (
-                <tr>
-                  <td colSpan={4} className="py-4 text-slate-500">
-                    暂无普通用户数据
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
       </div>
 
       <div className="card space-y-4">

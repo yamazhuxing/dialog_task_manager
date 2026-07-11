@@ -193,20 +193,40 @@ def get_dashboard_stats(db: Session) -> DashboardStats:
 
 
 def get_user_stats(db: Session) -> list[UserStatsItem]:
-    users = db.query(User).filter(User.role == "user").all()
+    users = db.query(User).order_by(User.role.desc(), User.username).all()
     results: list[UserStatsItem] = []
     for user in users:
-        claimed_count = db.query(func.count(Task.id)).filter(
-            Task.claimed_by_id == user.id, Task.status.in_(["claimed", "passed"])
-        ).scalar() or 0
-        submitted_count = db.query(func.count(Submission.id)).filter(Submission.user_id == user.id).scalar() or 0
+        claimed_count = (
+            db.query(func.count(Task.id))
+            .filter(Task.claimed_by_id == user.id, Task.status.in_(["claimed", "passed"]))
+            .scalar()
+            or 0
+        )
+        in_progress_count = (
+            db.query(func.count(Task.id))
+            .filter(Task.claimed_by_id == user.id, Task.status == "claimed")
+            .scalar()
+            or 0
+        )
+        submitted_count = (
+            db.query(func.count(Submission.id)).filter(Submission.user_id == user.id).scalar() or 0
+        )
+        failed_count = (
+            db.query(func.count(Submission.id))
+            .filter(Submission.user_id == user.id, Submission.status == "failed")
+            .scalar()
+            or 0
+        )
         passed_count = db.query(func.count(Sample.id)).filter(Sample.user_id == user.id).scalar() or 0
         results.append(
             UserStatsItem(
                 user_id=user.id,
                 username=user.username,
+                role=user.role,
                 claimed_count=claimed_count,
+                in_progress_count=in_progress_count,
                 submitted_count=submitted_count,
+                failed_count=failed_count,
                 passed_count=passed_count,
             )
         )
