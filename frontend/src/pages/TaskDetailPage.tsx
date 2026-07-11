@@ -1,6 +1,7 @@
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import {
+  Submission,
   TaskDetail,
   claimTask,
   fetchSubmission,
@@ -10,6 +11,128 @@ import {
   uploadTaskFile,
 } from "../api/client";
 import { useAuth } from "../contexts/AuthContext";
+
+const PIPELINE_STEPS: { step: string; label: string }[] = [
+  { step: "queued", label: "文件已接收" },
+  { step: "convert", label: "格式转换" },
+  { step: "quality_check", label: "质量检测" },
+  { step: "difficulty", label: "难度评级" },
+  { step: "persist", label: "样本入库" },
+  { step: "done", label: "处理完成" },
+];
+
+function stepStatusIcon(status: string) {
+  if (status === "done") return "✓";
+  if (status === "running") return "…";
+  if (status === "failed") return "✕";
+  return "○";
+}
+
+function stepStatusClass(status: string) {
+  if (status === "done") return "text-emerald-400 border-emerald-500/40 bg-emerald-500/10";
+  if (status === "running") return "text-cyan-300 border-cyan-400/50 bg-cyan-500/10 animate-pulse";
+  if (status === "failed") return "text-red-300 border-red-500/40 bg-red-500/10";
+  return "text-slate-500 border-white/10 bg-white/5";
+}
+
+function ProcessingTimeline({ submission }: { submission: Submission }) {
+  const logMap = new Map(submission.processing_log.map((item) => [item.step, item]));
+  const currentIdx = PIPELINE_STEPS.findIndex((s) => s.step === submission.processing_step);
+
+  return (
+    <div className="space-y-2">
+      {PIPELINE_STEPS.map((def, idx) => {
+        const item = logMap.get(def.step);
+        let status = item?.status || "pending";
+        if (!item && submission.status === "processing") {
+          status = idx <= currentIdx ? (idx === currentIdx ? "running" : "pending") : "pending";
+        }
+        if (!item && submission.status === "passed" && idx <= PIPELINE_STEPS.length - 1) {
+          status = "done";
+        }
+        if (!item && submission.status === "failed" && idx < currentIdx) {
+          status = "done";
+        }
+        const label = item?.label || def.label;
+        const message = item?.message;
+
+        return (
+          <div
+            key={def.step}
+            className={`flex items-start gap-3 rounded-xl border px-3 py-2 ${stepStatusClass(status)}`}
+          >
+            <span className="mt-0.5 w-4 shrink-0 text-center text-sm font-semibold">
+              {stepStatusIcon(status)}
+            </span>
+            <div className="min-w-0 flex-1">
+              <div className="text-sm font-medium">{label}</div>
+              {message && <div className="mt-0.5 text-xs opacity-80">{message}</div>}
+              {item?.at && <div className="mt-0.5 text-xs text-slate-500">{item.at}</div>}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function QCFailurePanel({ submission }: { submission: Submission }) {
+  const hints =
+    submission.qc_hints.length > 0
+      ? submission.qc_hints
+      : submission.error_message
+        ? [
+            {
+              error: submission.error_message,
+              essence: "请对照甲方质检项检查轨迹结构",
+              remedy: "根据报错调整对话后重新导出上传",
+            },
+          ]
+        : [];
+
+  const statEntries = Object.entries(submission.qc_stats || {});
+
+  return (
+    <div className="space-y-4">
+      {statEntries.length > 0 && (
+        <div className="flex flex-wrap gap-2 text-xs">
+          {statEntries.map(([key, value]) => (
+            <span key={key} className="rounded-full bg-white/5 px-2.5 py-1 text-slate-300">
+              {key}={value}
+            </span>
+          ))}
+        </div>
+      )}
+      <div className="overflow-x-auto rounded-xl border border-red-500/20">
+        <table className="w-full min-w-[640px] text-left text-sm">
+          <thead className="bg-red-500/10 text-xs text-red-200">
+            <tr>
+              <th className="px-3 py-2 font-medium">Session</th>
+              <th className="px-3 py-2 font-medium">报错</th>
+              <th className="px-3 py-2 font-medium">本质</th>
+              <th className="px-3 py-2 font-medium">补救</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-white/5">
+            {hints.map((hint, idx) => (
+              <tr key={idx} className="align-top">
+                <td className="px-3 py-3 font-mono text-xs text-slate-300">
+                  {submission.session_id?.slice(0, 8) || "—"}
+                </td>
+                <td className="px-3 py-3 text-red-200">{hint.error}</td>
+                <td className="px-3 py-3 text-slate-300">{hint.essence}</td>
+                <td className="px-3 py-3 text-cyan-200">{hint.remedy}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {submission.session_id && (
+        <div className="text-xs text-slate-500">完整 Session ID：{submission.session_id}</div>
+      )}
+    </div>
+  );
+}
 
 export function TaskDetailPage() {
   const { id } = useParams();
@@ -22,38 +145,57 @@ export function TaskDetailPage() {
   const [file, setFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
   const [pollingId, setPollingId] = useState<number | null>(null);
+  const [activeSubmission, setActiveSubmission] = useState<Submission | null>(null);
   const [copiedRound, setCopiedRound] = useState<number | null>(null);
 
-  const load = () => fetchTask(taskId).then(setTask).catch(console.error);
+  const load = useCallback(() => fetchTask(taskId).then(setTask).catch(console.error), [taskId]);
+
+  const loadSubmissions = useCallback(async () => {
+    try {
+      const subs = await fetchSubmissions(taskId);
+      const latest = subs[0] ?? null;
+      setActiveSubmission(latest);
+      if (latest?.status === "processing") {
+        setPollingId(latest.id);
+      }
+      return latest;
+    } catch (err) {
+      console.error(err);
+      return null;
+    }
+  }, [taskId]);
 
   useEffect(() => {
     load();
-  }, [taskId]);
+    loadSubmissions();
+  }, [load, loadSubmissions]);
 
   useEffect(() => {
     if (!pollingId) return;
     const timer = setInterval(async () => {
       try {
         const submission = await fetchSubmission(pollingId);
+        setActiveSubmission(submission);
         if (submission.status === "processing") return;
         setPollingId(null);
         setMessage(
           submission.status === "passed"
             ? `提交成功，难度：${submission.difficulty || "未知"}`
-            : `提交失败：${submission.error_message || "未知错误"}`,
+            : "提交未通过，请查看下方失败分析",
         );
         load();
       } catch {
         setPollingId(null);
       }
-    }, 3000);
+    }, 2000);
     return () => clearInterval(timer);
-  }, [pollingId]);
+  }, [pollingId, load]);
 
   if (!task) return <div>加载中...</div>;
 
   const isOwner = task.claimed_by === user?.username;
   const canUpload = task.status === "claimed" && isOwner;
+  const isProcessing = activeSubmission?.status === "processing" || !!pollingId;
 
   const onClaim = async () => {
     await claimTask(taskId);
@@ -75,9 +217,8 @@ export function TaskDetailPage() {
     setMessage("文件已上传，正在后台处理...");
     try {
       const submission = await uploadTaskFile(taskId, file, sourceType, modelVersion);
+      setActiveSubmission(submission);
       setPollingId(submission.id);
-      const history = await fetchSubmissions(taskId);
-      console.log(history);
     } catch (err: unknown) {
       const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
       setMessage(msg || "上传失败");
@@ -187,8 +328,8 @@ export function TaskDetailPage() {
               onChange={(e) => setFile(e.target.files?.[0] || null)}
             />
           </div>
-          <button className="btn btn-primary" onClick={onUpload} disabled={uploading || !!pollingId}>
-            {uploading || pollingId ? "处理中..." : "上传并自动质检评级"}
+          <button className="btn btn-primary" onClick={onUpload} disabled={uploading || isProcessing}>
+            {uploading || isProcessing ? "处理中..." : "上传并自动质检评级"}
           </button>
           <p className="text-xs text-slate-500">
             质检失败可多次重新上传；任务仍由你占用，直至通过或主动释放。
@@ -196,12 +337,43 @@ export function TaskDetailPage() {
         </div>
       )}
 
-      {message && <div className="rounded-xl bg-white/5 px-4 py-3 text-sm">{message}</div>}
-      {task.latest_submission_error && (
-        <div className="rounded-xl bg-red-500/10 px-4 py-3 text-sm text-red-300">
-          最近失败：{task.latest_submission_error}
+      {activeSubmission && (isProcessing || activeSubmission.status !== "processing") && (
+        <div className="card space-y-4">
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="text-lg font-medium">处理进度</h2>
+            <span
+              className={`badge ${
+                activeSubmission.status === "passed"
+                  ? "badge-passed"
+                  : activeSubmission.status === "failed"
+                    ? "bg-red-500/20 text-red-300"
+                    : "badge-claimed"
+              }`}
+            >
+              {activeSubmission.status === "processing"
+                ? "处理中"
+                : activeSubmission.status === "passed"
+                  ? "已通过"
+                  : "未通过"}
+            </span>
+          </div>
+          <ProcessingTimeline submission={activeSubmission} />
+          {activeSubmission.status === "passed" && activeSubmission.difficulty && (
+            <div className="rounded-xl bg-cyan-500/10 px-4 py-3 text-sm text-cyan-200">
+              难度评级：{activeSubmission.difficulty}
+              {activeSubmission.detected_model ? ` · 检测模型：${activeSubmission.detected_model}` : ""}
+            </div>
+          )}
+          {activeSubmission.status === "failed" && (
+            <div className="space-y-3">
+              <h3 className="text-base font-medium text-red-200">质检失败分析</h3>
+              <QCFailurePanel submission={activeSubmission} />
+            </div>
+          )}
         </div>
       )}
+
+      {message && <div className="rounded-xl bg-white/5 px-4 py-3 text-sm">{message}</div>}
     </div>
   );
 }

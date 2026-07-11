@@ -64,6 +64,20 @@ class TaskDetail(BaseModel):
     latest_submission_error: str | None = None
 
 
+class ProcessingLogItem(BaseModel):
+    step: str
+    label: str | None = None
+    message: str | None = None
+    status: str | None = None
+    at: str | None = None
+
+
+class QCHintItem(BaseModel):
+    error: str
+    essence: str
+    remedy: str
+
+
 class SubmissionResponse(BaseModel):
     id: int
     task_id: int
@@ -74,6 +88,11 @@ class SubmissionResponse(BaseModel):
     detected_model: str | None = None
     difficulty: str | None = None
     error_message: str | None = None
+    processing_step: str | None = None
+    processing_log: list[ProcessingLogItem] = []
+    qc_errors: list[str] = []
+    qc_hints: list[QCHintItem] = []
+    qc_stats: dict[str, str] = {}
     created_at: datetime
 
     class Config:
@@ -97,6 +116,11 @@ class DashboardStats(BaseModel):
     scene_covered_count: int
     scene_total_count: int = 13
     scene_range_ratio: float | None = None
+    assistant_turns_distribution: dict[str, int] = {}
+    assistant_turns_min: int | None = None
+    assistant_turns_max: int | None = None
+    assistant_turns_avg: float | None = None
+    assistant_turns_known_count: int = 0
 
 
 class UserStatsItem(BaseModel):

@@ -68,6 +68,11 @@ export interface DashboardStats {
   scene_covered_count: number;
   scene_total_count: number;
   scene_range_ratio: number | null;
+  assistant_turns_distribution: Record<string, number>;
+  assistant_turns_min: number | null;
+  assistant_turns_max: number | null;
+  assistant_turns_avg: number | null;
+  assistant_turns_known_count: number;
 }
 
 export async function login(username: string, password: string) {
@@ -106,6 +111,38 @@ export async function fetchDashboard() {
   return data;
 }
 
+export interface ProcessingLogItem {
+  step: string;
+  label?: string | null;
+  message?: string | null;
+  status?: string | null;
+  at?: string | null;
+}
+
+export interface QCHintItem {
+  error: string;
+  essence: string;
+  remedy: string;
+}
+
+export interface Submission {
+  id: number;
+  task_id: number;
+  status: string;
+  source_type: string;
+  model_version: string;
+  session_id: string | null;
+  detected_model: string | null;
+  difficulty: string | null;
+  error_message: string | null;
+  processing_step: string | null;
+  processing_log: ProcessingLogItem[];
+  qc_errors: string[];
+  qc_hints: QCHintItem[];
+  qc_stats: Record<string, string>;
+  created_at: string;
+}
+
 export async function uploadTaskFile(
   taskId: number,
   file: File,
@@ -116,17 +153,17 @@ export async function uploadTaskFile(
   form.append("file", file);
   form.append("source_type", sourceType);
   form.append("model_version", modelVersion);
-  const { data } = await api.post(`/tasks/${taskId}/upload`, form);
+  const { data } = await api.post<Submission>(`/tasks/${taskId}/upload`, form);
   return data;
 }
 
 export async function fetchSubmissions(taskId: number) {
-  const { data } = await api.get(`/tasks/${taskId}/submissions`);
+  const { data } = await api.get<Submission[]>(`/tasks/${taskId}/submissions`);
   return data;
 }
 
 export async function fetchSubmission(id: number) {
-  const { data } = await api.get(`/submissions/${id}`);
+  const { data } = await api.get<Submission>(`/submissions/${id}`);
   return data;
 }
 

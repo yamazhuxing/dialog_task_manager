@@ -5,6 +5,8 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+from collections.abc import Callable
+
 from backend.config import Settings
 
 from backend.services.quality_report import refresh_delivery_report, remove_convert_metadata
@@ -13,7 +15,51 @@ SAMPLE_METADATA_FILENAME = "sample_metadata.json"
 
 
 class PipelineError(Exception):
-    pass
+    def __init__(
+        self,
+        message: str,
+        *,
+        errors: list[str] | None = None,
+        session_id: str | None = None,
+        qc_stats: dict | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.errors = errors or []
+        self.session_id = session_id
+        self.qc_stats = qc_stats or {}
+
+
+def _collect_qc_failure_details(convert_session_dir: Path, work_dir: Path, session_id: str) -> tuple[list[str], dict]:
+    """质检未通过时收集具体报错（复用 validate_session，不修改验收标准）。"""
+    from quality_check import validate_session
+
+    errors: list[str] = []
+    stats: dict = {}
+    try:
+        _ok, errors, stats = validate_session(convert_session_dir)
+    except Exception as exc:
+        errors = [str(exc)]
+
+    if not errors:
+        fail_csv = (
+            work_dir
+            / "openclaw-待质检数据-质检结果"
+            / "openclaw-待质检数据-fail"
+            / "failures.csv"
+        )
+        if fail_csv.exists():
+            import csv
+
+            with open(fail_csv, encoding="utf-8-sig") as f:
+                for row in csv.DictReader(f):
+                    if row.get("Session ID") == session_id and row.get("失败原因"):
+                        errors = [e.strip() for e in row["失败原因"].split(";") if e.strip()]
+                        break
+
+    if not errors:
+        errors = ["质检未通过，session 未进入 pass 目录"]
+
+    return errors, stats
 
 
 def _run_script(settings: Settings, script: str, args: list[str]) -> None:
@@ -64,7 +110,16 @@ def _detect_model(convert_session_dir: Path) -> str | None:
     return data.get("request", {}).get("model") or data.get("model")
 
 
-def run_openclaw_pipeline(settings: Settings, uploaded_file: Path, work_dir: Path) -> dict:
+def run_openclaw_pipeline(
+    settings: Settings,
+    uploaded_file: Path,
+    work_dir: Path,
+    on_progress: Callable[[str, str, str], None] | None = None,
+) -> dict:
+    def progress(step: str, message: str, status: str = "running") -> None:
+        if on_progress:
+            on_progress(step, message, status)
+
     work_dir.mkdir(parents=True, exist_ok=True)
     input_dir = work_dir / "input"
     if input_dir.exists():
@@ -77,11 +132,13 @@ def run_openclaw_pipeline(settings: Settings, uploaded_file: Path, work_dir: Pat
     convert_dir = work_dir / "openclaw-待质检数据"
     pass_dir = work_dir / "openclaw-待质检数据-质检结果" / "openclaw-待质检数据-pass"
 
+    progress("convert", "正在执行格式转换...")
     _run_script(
         settings,
         "convert_openclaw.py",
         ["--input_dir", str(input_dir), "--output_dir", str(convert_dir)],
     )
+    progress("convert", "格式转换完成", "done")
 
     session_dirs = [d for d in convert_dir.iterdir() if d.is_dir()]
     if not session_dirs:
@@ -90,19 +147,22 @@ def run_openclaw_pipeline(settings: Settings, uploaded_file: Path, work_dir: Pat
     session_id = session_dirs[0].name
     session_dir = convert_dir / session_id
 
+    progress("quality_check", "正在执行质量检测...")
     _run_script(settings, "quality_check.py", ["--input_dir", str(convert_dir)])
 
     pass_session_dir = pass_dir / session_id
     if not pass_session_dir.exists():
-        fail_root = work_dir / "openclaw-待质检数据-质检结果" / "openclaw-待质检数据-fail"
-        fail_session = fail_root / session_id
-        errors = []
-        if fail_session.exists():
-            csv_path = fail_root / "failures.csv"
-            if csv_path.exists():
-                errors.append("质检未通过，详见 failures.csv")
-        raise PipelineError("质检未通过。" + (" ".join(errors) if errors else ""))
+        errors, qc_stats = _collect_qc_failure_details(session_dir, work_dir, session_id)
+        progress("quality_check", "质量检测未通过", "failed")
+        raise PipelineError(
+            "质检未通过",
+            errors=errors,
+            session_id=session_id,
+            qc_stats=qc_stats,
+        )
+    progress("quality_check", "质量检测通过", "done")
 
+    progress("difficulty", "正在评级任务难度...")
     _run_script(
         settings,
         "batch_deepseek_simple.py",
@@ -115,6 +175,7 @@ def run_openclaw_pipeline(settings: Settings, uploaded_file: Path, work_dir: Pat
             settings.deepseek_api_base,
         ],
     )
+    progress("difficulty", "难度评级完成", "done")
 
     detected_model = _detect_model(session_dir)
     difficulty, justification = _read_difficulty(pass_session_dir)

@@ -29,6 +29,12 @@ from backend.services.pipeline import (
     persist_passed_sample,
     run_openclaw_pipeline,
 )
+from backend.services.qc_hints import build_qc_hints
+from backend.services.submission_progress import (
+    append_processing_log,
+    init_processing_log,
+    mark_step_done,
+)
 from backend.services.questions import (
     create_delivery_zip,
     create_single_task,
@@ -170,6 +176,34 @@ def release(task_id: int, db: Session = Depends(get_db), user: User = Depends(ge
     return task_to_detail(task)
 
 
+def _submission_to_response(submission: Submission) -> SubmissionResponse:
+    processing_log = json.loads(submission.processing_log_json or "[]")
+    qc_errors = json.loads(submission.qc_errors_json or "[]")
+    qc_stats_raw = json.loads(submission.qc_stats_json or "{}")
+    qc_stats = (
+        {str(k): str(v) for k, v in qc_stats_raw.items()}
+        if isinstance(qc_stats_raw, dict)
+        else {}
+    )
+    return SubmissionResponse(
+        id=submission.id,
+        task_id=submission.task_id,
+        status=submission.status,
+        source_type=submission.source_type,
+        model_version=submission.model_version,
+        session_id=submission.session_id,
+        detected_model=submission.detected_model,
+        difficulty=submission.difficulty,
+        error_message=submission.error_message,
+        processing_step=submission.processing_step,
+        processing_log=processing_log,
+        qc_errors=qc_errors,
+        qc_hints=build_qc_hints(qc_errors),
+        qc_stats=qc_stats,
+        created_at=submission.created_at,
+    )
+
+
 def _process_submission(submission_id: int) -> None:
     db = SessionLocal()
     try:
@@ -186,7 +220,13 @@ def _process_submission(submission_id: int) -> None:
             if submission.source_type == "hermes":
                 raise PipelineError("Hermes 流水线第一期暂未开放，请使用 OpenClaw")
 
-            result = run_openclaw_pipeline(settings, uploaded_file, work_dir)
+            def on_progress(step: str, message: str, status: str = "running") -> None:
+                submission_ref = db.get(Submission, submission_id)
+                if not submission_ref:
+                    return
+                append_processing_log(db, submission_ref, step=step, message=message, status=status)
+
+            result = run_openclaw_pipeline(settings, uploaded_file, work_dir, on_progress=on_progress)
             metadata = build_sample_metadata(
                 task_id=task.id,
                 session_id=result["session_id"],
@@ -199,6 +239,7 @@ def _process_submission(submission_id: int) -> None:
                 detected_model=result["detected_model"],
                 difficulty=result["difficulty"],
             )
+            append_processing_log(db, submission, step="persist", message="正在写入样本与备份...")
             paths = persist_passed_sample(
                 settings,
                 task_id=task.id,
@@ -216,6 +257,9 @@ def _process_submission(submission_id: int) -> None:
             submission.justification = result["justification"]
             submission.qc_stats_json = json.dumps(result["qc_stats"], ensure_ascii=False)
             submission.error_message = None
+            submission.qc_errors_json = None
+            mark_step_done(db, submission, "persist", "样本已入库")
+            mark_step_done(db, submission, "done", "处理完成")
 
             existing_sample = db.query(Sample).filter(Sample.task_id == task.id).first()
             if existing_sample:
@@ -246,7 +290,20 @@ def _process_submission(submission_id: int) -> None:
             db.commit()
         except PipelineError as exc:
             submission.status = "failed"
-            submission.error_message = str(exc)[:4000]
+            errors = exc.errors or [str(exc)]
+            submission.session_id = exc.session_id or submission.session_id
+            submission.qc_errors_json = json.dumps(errors, ensure_ascii=False)
+            if exc.qc_stats:
+                submission.qc_stats_json = json.dumps(exc.qc_stats, ensure_ascii=False)
+            summary = errors[0] if errors else str(exc)
+            submission.error_message = summary[:4000]
+            append_processing_log(
+                db,
+                submission,
+                step=submission.processing_step or "quality_check",
+                message="处理失败",
+                status="failed",
+            )
             db.commit()
     finally:
         db.close()
@@ -261,7 +318,7 @@ async def upload_task_file(
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
-) -> Submission:
+) -> SubmissionResponse:
     task = db.get(Task, task_id)
     if not task:
         raise HTTPException(status_code=404, detail="任务不存在")
@@ -299,9 +356,10 @@ async def upload_task_file(
     task.model_version = model_version
     db.commit()
     db.refresh(submission)
+    init_processing_log(db, submission)
 
     background_tasks.add_task(_process_submission, submission.id)
-    return submission
+    return _submission_to_response(submission)
 
 
 @router.get("/tasks/{task_id}/submissions", response_model=list[SubmissionResponse])
@@ -309,18 +367,19 @@ def list_task_submissions(
     task_id: int,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
-) -> list[Submission]:
+) -> list[SubmissionResponse]:
     task = db.get(Task, task_id)
     if not task:
         raise HTTPException(status_code=404, detail="任务不存在")
     if task.claimed_by_id != user.id and user.role != "admin":
         raise HTTPException(status_code=403, detail="无权查看该任务提交记录")
-    return (
+    submissions = (
         db.query(Submission)
         .filter(Submission.task_id == task_id)
         .order_by(Submission.id.desc())
         .all()
     )
+    return [_submission_to_response(item) for item in submissions]
 
 
 @router.get("/submissions/{submission_id}", response_model=SubmissionResponse)
@@ -328,13 +387,13 @@ def get_submission(
     submission_id: int,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
-) -> Submission:
+) -> SubmissionResponse:
     submission = db.get(Submission, submission_id)
     if not submission:
         raise HTTPException(status_code=404, detail="提交记录不存在")
     if submission.user_id != user.id and user.role != "admin":
         raise HTTPException(status_code=403, detail="无权查看")
-    return submission
+    return _submission_to_response(submission)
 
 
 @router.post("/questions/import-default", response_model=QuestionImportResponse)

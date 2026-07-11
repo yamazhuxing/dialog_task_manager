@@ -17,13 +17,18 @@ function DistributionCard({
   data,
   ok,
   hint,
+  sortNumeric = false,
 }: {
   title: string;
   data: Record<string, number>;
   ok?: boolean;
   hint?: string;
+  sortNumeric?: boolean;
 }) {
   const entries = Object.entries(data);
+  const sortedEntries = sortNumeric
+    ? [...entries].sort(([a], [b]) => Number(a) - Number(b))
+    : entries;
   const total = entries.reduce((sum, [, v]) => sum + v, 0);
   const showStatus = ok !== undefined && total > 0;
   return (
@@ -39,10 +44,10 @@ function DistributionCard({
       {hint && <div className="mt-1 text-xs text-slate-500">{hint}</div>}
       <div className="mt-4 space-y-2">
         {entries.length === 0 && <div className="text-sm text-slate-500">暂无数据</div>}
-        {entries.map(([key, value]) => (
+        {sortedEntries.map(([key, value]) => (
           <div key={key} className={value === 0 ? "opacity-50" : undefined}>
             <div className="mb-1 flex justify-between text-sm">
-              <span>{key}</span>
+              <span>{sortNumeric ? `${key} 轮` : key}</span>
               <span>
                 {value} {total > 0 ? `(${((value / total) * 100).toFixed(1)}%)` : ""}
               </span>
@@ -75,6 +80,11 @@ export function DashboardPage() {
     stats.scene_range_ratio != null
       ? `单类最少 ${stats.scene_min_count} 条、最多 ${stats.scene_max_count} 条；极差比 max÷min = ${stats.scene_range_ratio}（要求 < 5）`
       : `单类最少 ${stats.scene_min_count} 条、最多 ${stats.scene_max_count} 条；极差比待计算（13 类均需至少 1 条后才算 max÷min）`;
+
+  const assistantTurnsHint =
+    stats.assistant_turns_known_count > 0
+      ? `已统计 ${stats.assistant_turns_known_count}/${stats.passed_count} 条通过样本；平均 ${stats.assistant_turns_avg} 轮，最少 ${stats.assistant_turns_min} 轮，最多 ${stats.assistant_turns_max} 轮（验收标准 ≥ 5）`
+      : "暂无通过样本的轮次数据（新入库样本会自动统计）";
 
   return (
     <div className="space-y-6">
@@ -118,6 +128,12 @@ export function DashboardPage() {
           hint={`已覆盖 ${stats.scene_covered_count}/${stats.scene_total_count} 类；极差比 max÷min ${stats.scene_range_ratio != null ? `= ${stats.scene_range_ratio}（< 5 达标）` : "待计算（每类需 ≥1 条）"}`}
         />
         <DistributionCard title="难度分布" data={stats.difficulty_distribution} />
+        <DistributionCard
+          title="Assistant 轮次分布（通过样本）"
+          data={stats.assistant_turns_distribution}
+          sortNumeric
+          hint={assistantTurnsHint}
+        />
       </div>
 
       <div className="card">

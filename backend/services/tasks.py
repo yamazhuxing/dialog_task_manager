@@ -90,6 +90,25 @@ SOURCE_OPENCLAW_RATIO_MIN = 0.55
 SOURCE_OPENCLAW_RATIO_MAX = 0.65
 MODEL_OPUS48_RATIO_MIN = 0.70
 SCENE_RATIO_MAX = 5
+ASSISTANT_TURNS_MIN = 5
+
+
+def _parse_assistant_turns(qc_stats_json: str | None) -> int | None:
+    if not qc_stats_json:
+        return None
+    try:
+        stats = json.loads(qc_stats_json)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(stats, dict):
+        return None
+    raw = stats.get("assistant_turns", stats.get("turns"))
+    if raw is None:
+        return None
+    try:
+        return int(float(str(raw).replace("%", "").strip()))
+    except (TypeError, ValueError):
+        return None
 
 
 def get_dashboard_stats(db: Session) -> DashboardStats:
@@ -132,6 +151,23 @@ def get_dashboard_stats(db: Session) -> DashboardStats:
     total_model = opus48 + opus46
     model_ratio_ok = total_model > 0 and (opus48 / total_model >= MODEL_OPUS48_RATIO_MIN)
 
+    turn_rows = (
+        db.query(Submission.qc_stats_json)
+        .join(Sample, Sample.submission_id == Submission.id)
+        .all()
+    )
+    turn_counts: list[int] = []
+    for (qc_stats_json,) in turn_rows:
+        turns = _parse_assistant_turns(qc_stats_json)
+        if turns is not None:
+            turn_counts.append(turns)
+
+    assistant_turns_distribution = dict(Counter(str(n) for n in turn_counts))
+    assistant_turns_min = min(turn_counts) if turn_counts else None
+    assistant_turns_max = max(turn_counts) if turn_counts else None
+    assistant_turns_avg = round(sum(turn_counts) / len(turn_counts), 1) if turn_counts else None
+    assistant_turns_known_count = len(turn_counts)
+
     return DashboardStats(
         passed_count=passed_count,
         claimed_count=claimed_count,
@@ -148,6 +184,11 @@ def get_dashboard_stats(db: Session) -> DashboardStats:
         scene_covered_count=scene_covered_count,
         scene_total_count=scene_total_count,
         scene_range_ratio=scene_range_ratio,
+        assistant_turns_distribution=assistant_turns_distribution,
+        assistant_turns_min=assistant_turns_min,
+        assistant_turns_max=assistant_turns_max,
+        assistant_turns_avg=assistant_turns_avg,
+        assistant_turns_known_count=assistant_turns_known_count,
     )
 
 

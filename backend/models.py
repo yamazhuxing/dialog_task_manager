@@ -60,6 +60,9 @@ class Submission(Base):
     difficulty: Mapped[str | None] = mapped_column(String(16), nullable=True)
     justification: Mapped[str | None] = mapped_column(Text, nullable=True)
     qc_stats_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    processing_step: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    processing_log_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    qc_errors_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 

@@ -6,6 +6,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from sqlalchemy import inspect, text
 from sqlalchemy.orm import Session
 
 from backend.auth import hash_password
@@ -19,9 +20,30 @@ from backend.services.questions import import_questions_from_data, load_question
 logger = logging.getLogger(__name__)
 
 
+def _ensure_submission_columns() -> None:
+    inspector = inspect(engine)
+    if "submissions" not in inspector.get_table_names():
+        return
+    existing = {col["name"] for col in inspector.get_columns("submissions")}
+    statements = []
+    if "processing_step" not in existing:
+        statements.append("ALTER TABLE submissions ADD COLUMN processing_step VARCHAR(32) NULL")
+    if "processing_log_json" not in existing:
+        statements.append("ALTER TABLE submissions ADD COLUMN processing_log_json TEXT NULL")
+    if "qc_errors_json" not in existing:
+        statements.append("ALTER TABLE submissions ADD COLUMN qc_errors_json TEXT NULL")
+    if not statements:
+        return
+    with engine.begin() as conn:
+        for sql in statements:
+            conn.execute(text(sql))
+    logger.info("Migrated submissions table with new columns")
+
+
 def _ensure_admin_and_questions() -> None:
     settings = get_settings()
     Base.metadata.create_all(bind=engine)
+    _ensure_submission_columns()
     db: Session = SessionLocal()
     try:
         admin = db.query(User).filter(User.username == settings.admin_username).first()
