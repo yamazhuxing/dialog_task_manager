@@ -109,6 +109,8 @@ cd /root/dialog_task_manager   # 换成你的实际目录
 grep APP_PORT .env             # 例如 APP_PORT=8005
 test -f static/index.html && echo "frontend OK" || (cd frontend && npm run build)
 chmod +x deploy/start.sh
+# 若从 Windows 拉取代码，先去掉 CRLF（exit 127 常见原因）
+sed -i 's/\r$//' deploy/start.sh
 ```
 
 **（2）安装 systemd 单元**
@@ -145,6 +147,34 @@ sudo systemctl restart dialog-task-manager
 服务监听 `.env` 中的 `APP_PORT`（默认 8005），浏览器访问：`http://服务器IP:8005`。
 
 > 若之前用前台方式启动过，先 `Ctrl+C` 或 `pkill -f "uvicorn backend.app:app"`，再 `systemctl start`，避免端口冲突。
+
+**（5）故障排查（`status=127` / 反复 auto-restart）**
+
+`exit-code 127` 表示「命令找不到」，按顺序执行：
+
+```bash
+cd /root/dialog_task_manager
+
+# 1. 看 systemd 日志
+journalctl -u dialog-task-manager -n 30 --no-pager
+
+# 2. 检查脚本换行符（有 ^M 说明是 Windows CRLF，会导致 127）
+cat -A deploy/start.sh | head -3
+sed -i 's/\r$//' deploy/start.sh
+chmod +x deploy/start.sh
+
+# 3. 检查 Python 虚拟环境
+ls -la .venv/bin/uvicorn || uv sync
+
+# 4. 手动运行脚本（应看到 Uvicorn running on ...）
+./deploy/start.sh
+
+# 5. 确认无误后重启服务
+sudo systemctl restart dialog-task-manager
+sudo systemctl status dialog-task-manager
+```
+
+若 `.env` 中密码含 `&`、`$` 等特殊字符，请用引号包裹，例如：`DB_PASSWORD='slover_123&'`。
 
 ### 4. Nginx 反向代理（可选）
 

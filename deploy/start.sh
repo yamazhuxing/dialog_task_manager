@@ -13,4 +13,12 @@ if [[ -f .env ]]; then
 fi
 
 PORT="${APP_PORT:-8005}"
-exec "${ROOT}/.venv/bin/uvicorn" backend.app:app --host 0.0.0.0 --port "${PORT}"
+UVICORN="${ROOT}/.venv/bin/uvicorn"
+
+if [[ ! -x "${UVICORN}" ]]; then
+  echo "ERROR: uvicorn not found at ${UVICORN}" >&2
+  echo "Run: cd ${ROOT} && uv sync" >&2
+  exit 127
+fi
+
+exec "${UVICORN}" backend.app:app --host 0.0.0.0 --port "${PORT}"
