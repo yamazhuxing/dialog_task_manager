@@ -2,11 +2,29 @@ import React, { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { DashboardStats, fetchDashboard } from "../api/client";
 
-function StatCard({ title, value, hint }: { title: string; value: string | number; hint?: string }) {
+function StatCard({
+  title,
+  value,
+  hint,
+  compact = false,
+}: {
+  title: string;
+  value: string | number;
+  hint?: string;
+  compact?: boolean;
+}) {
   return (
     <div className="card">
       <div className="text-sm text-slate-400">{title}</div>
-      <div className="mt-2 text-3xl font-semibold text-cyan-300">{value}</div>
+      <div
+        className={
+          compact
+            ? "mt-2 text-lg font-medium leading-snug text-cyan-300"
+            : "mt-2 text-2xl font-semibold text-cyan-300"
+        }
+      >
+        {value}
+      </div>
       {hint && <div className="mt-2 text-xs text-slate-500">{hint}</div>}
     </div>
   );
@@ -172,8 +190,9 @@ export function DashboardPage() {
           title="场景覆盖 / 极差比"
           value={`已覆盖 ${stats.scene_covered_count}/${stats.scene_total_count} 类 · 极差 ${sceneRangeLabel}`}
           hint={sceneRangeHint}
+          compact
         />
-        <StatCard title="Assistant 轮次" value={assistantTurnsValue} hint={assistantTurnsHint} />
+        <StatCard title="Assistant 轮次" value={assistantTurnsValue} hint={assistantTurnsHint} compact />
       </div>
 
       <div className="grid gap-4 xl:grid-cols-2">
