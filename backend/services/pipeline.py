@@ -10,6 +10,12 @@ from collections.abc import Callable
 from backend.config import Settings
 
 from backend.services.quality_report import refresh_delivery_report, remove_convert_metadata
+from backend.models import Task
+from backend.services.submission_validation import (
+    SubmissionValidationError,
+    ensure_dialogue_matches_task,
+    sample_storage_dir_name,
+)
 
 SAMPLE_METADATA_FILENAME = "sample_metadata.json"
 
@@ -115,6 +121,8 @@ def run_openclaw_pipeline(
     uploaded_file: Path,
     work_dir: Path,
     on_progress: Callable[[str, str, str], None] | None = None,
+    task: Task | None = None,
+    validate_session_id: Callable[[str], None] | None = None,
 ) -> dict:
     def progress(step: str, message: str, status: str = "running") -> None:
         if on_progress:
@@ -146,6 +154,16 @@ def run_openclaw_pipeline(
 
     session_id = session_dirs[0].name
     session_dir = convert_dir / session_id
+
+    if validate_session_id:
+        validate_session_id(session_id)
+
+    if task is not None:
+        try:
+            ensure_dialogue_matches_task(session_dir, task)
+        except SubmissionValidationError as exc:
+            progress("convert", "任务校验未通过", "failed")
+            raise PipelineError(exc.message, session_id=session_id) from exc
 
     progress("quality_check", "正在执行质量检测...")
     _run_script(settings, "quality_check.py", ["--input_dir", str(convert_dir)])
@@ -249,11 +267,12 @@ def persist_passed_sample(
     for path in (openclaw_raw, convert_master, pass_master, backup_root):
         path.mkdir(parents=True, exist_ok=True)
 
-    raw_dest = openclaw_raw / uploaded_file.name
+    raw_dest = openclaw_raw / f"{task_id}_{session_id}.jsonl"
     shutil.copy2(uploaded_file, raw_dest)
 
-    convert_session_master = convert_master / session_id
-    pass_session_master = pass_master / session_id
+    storage_name = sample_storage_dir_name(task_id, session_id)
+    convert_session_master = convert_master / storage_name
+    pass_session_master = pass_master / storage_name
     for dest in (convert_session_master, pass_session_master):
         if dest.exists():
             shutil.rmtree(dest)

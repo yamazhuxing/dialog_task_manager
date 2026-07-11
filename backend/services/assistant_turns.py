@@ -9,6 +9,8 @@ from pathlib import Path
 
 from backend.models import Sample, Submission
 
+from backend.services.submission_validation import sample_storage_dir_name
+
 TURN_BUCKETS: list[tuple[str, str]] = [
     ("5", "5 轮（刚好达标）"),
     ("6-9", "6-9 轮"),
@@ -45,13 +47,26 @@ def turns_from_qc_stats_json(qc_stats_json: str | None) -> int | None:
     return turns_from_qc_stats(stats)
 
 
-def turns_from_report(qc_dir: str, session_id: str) -> int | None:
+def resolve_session_dir(convert_dir: str, sample: Sample) -> Path | None:
+    storage_dir = Path(convert_dir) / sample_storage_dir_name(sample.task_id, sample.session_id)
+    if storage_dir.is_dir():
+        return storage_dir
+    legacy_dir = Path(convert_dir) / sample.session_id
+    if legacy_dir.is_dir():
+        return legacy_dir
+    return None
+
+
+def turns_from_report(qc_dir: str, session_id: str, task_id: int | None = None) -> int | None:
     report = Path(qc_dir) / "openclaw-待质检数据-report" / "report.txt"
     if not report.exists():
         return None
+    markers = [session_id]
+    if task_id is not None:
+        markers.append(sample_storage_dir_name(task_id, session_id))
     lines = report.read_text(encoding="utf-8", errors="replace").splitlines()
     for i, line in enumerate(lines):
-        if session_id not in line:
+        if not any(marker in line for marker in markers):
             continue
         for j in range(i, min(i + 3, len(lines))):
             match = re.search(r"turns=(\d+)", lines[j])
@@ -60,9 +75,9 @@ def turns_from_report(qc_dir: str, session_id: str) -> int | None:
     return None
 
 
-def turns_from_session_dir(convert_dir: str, session_id: str) -> int | None:
-    session_dir = Path(convert_dir) / session_id
-    if not session_dir.is_dir():
+def turns_from_session_dir(convert_dir: str, sample: Sample) -> int | None:
+    session_dir = resolve_session_dir(convert_dir, sample)
+    if session_dir is None:
         return None
     try:
         from quality_check import validate_session
@@ -82,11 +97,11 @@ def resolve_assistant_turns(sample: Sample, submission: Submission | None = None
         if turns is not None:
             return turns
 
-    turns = turns_from_report(sample.qc_dir, sample.session_id)
+    turns = turns_from_report(sample.qc_dir, sample.session_id, sample.task_id)
     if turns is not None:
         return turns
 
-    return turns_from_session_dir(sample.convert_dir, sample.session_id)
+    return turns_from_session_dir(sample.convert_dir, sample)
 
 
 def bucket_assistant_turns(turns: int) -> str:

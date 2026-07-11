@@ -24,6 +24,16 @@ _RULES: list[tuple[re.Pattern[str], str, str]] = [
         "追问逼出 write/exec，让至少一次 thinking 出现在 tool_result 之后",
     ),
     (
+        re.compile(r"上传失败，请确认当前任务"),
+        "提交未通过校验",
+        "请确认任务与文件后重新上传",
+    ),
+    (
+        re.compile(r"上传失败，请更换对话文件"),
+        "提交未通过校验",
+        "请重新制作对话后上传",
+    ),
+    (
         re.compile(r"assistant turns", re.I),
         "对话轮数不足",
         "继续多轮追问，确保至少 5 轮有效 assistant 回复",

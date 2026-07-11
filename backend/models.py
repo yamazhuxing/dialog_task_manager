@@ -81,7 +81,7 @@ class Sample(Base):
     model_version: Mapped[str] = mapped_column(String(16), index=True)
     detected_model: Mapped[str | None] = mapped_column(String(64), nullable=True)
     scene: Mapped[str] = mapped_column(String(64), index=True)
-    session_id: Mapped[str] = mapped_column(String(64), index=True)
+    session_id: Mapped[str] = mapped_column(String(64), unique=True, index=True)
     difficulty: Mapped[str | None] = mapped_column(String(16), nullable=True)
     assistant_turns: Mapped[int | None] = mapped_column(Integer, nullable=True)
     raw_file_path: Mapped[str] = mapped_column(String(512))

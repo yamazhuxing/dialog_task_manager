@@ -48,12 +48,18 @@ def _ensure_sample_columns() -> None:
     statements = []
     if "assistant_turns" not in existing:
         statements.append("ALTER TABLE samples ADD COLUMN assistant_turns INT NULL")
+    indexes = {idx["name"] for idx in inspector.get_indexes("samples")}
+    if "uq_samples_session_id" not in indexes:
+        statements.append("ALTER TABLE samples ADD UNIQUE INDEX uq_samples_session_id (session_id)")
     if not statements:
         return
     with engine.begin() as conn:
         for sql in statements:
-            conn.execute(text(sql))
-    logger.info("Migrated samples table with new columns")
+            try:
+                conn.execute(text(sql))
+            except Exception as exc:
+                logger.warning("Sample migration skipped for `%s`: %s", sql, exc)
+    logger.info("Migrated samples table with new columns/indexes")
 
 
 def _ensure_admin_and_questions() -> None:

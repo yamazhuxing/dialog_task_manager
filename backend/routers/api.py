@@ -30,6 +30,12 @@ from backend.services.pipeline import (
     run_openclaw_pipeline,
 )
 from backend.services.assistant_turns import turns_from_qc_stats
+from backend.services.submission_validation import (
+    SESSION_REUSED_MESSAGE,
+    SubmissionValidationError,
+    ensure_session_available,
+    peek_session_id,
+)
 from backend.services.qc_hints import build_qc_hints
 from backend.services.submission_progress import (
     append_processing_log,
@@ -227,7 +233,18 @@ def _process_submission(submission_id: int) -> None:
                     return
                 append_processing_log(db, submission_ref, step=step, message=message, status=status)
 
-            result = run_openclaw_pipeline(settings, uploaded_file, work_dir, on_progress=on_progress)
+            def validate_session_id(session_id: str) -> None:
+                ensure_session_available(db, session_id)
+
+            result = run_openclaw_pipeline(
+                settings,
+                uploaded_file,
+                work_dir,
+                on_progress=on_progress,
+                task=task,
+                validate_session_id=validate_session_id,
+            )
+            ensure_session_available(db, result["session_id"])
             metadata = build_sample_metadata(
                 task_id=task.id,
                 session_id=result["session_id"],
@@ -343,6 +360,13 @@ async def upload_task_file(
     dest = upload_dir / f"{timestamp}_{filename}"
     content = await file.read()
     dest.write_bytes(content)
+
+    try:
+        peeked_session_id = peek_session_id(dest)
+        ensure_session_available(db, peeked_session_id)
+    except SubmissionValidationError:
+        dest.unlink(missing_ok=True)
+        raise HTTPException(status_code=400, detail=SESSION_REUSED_MESSAGE) from None
 
     submission = Submission(
         task_id=task.id,
