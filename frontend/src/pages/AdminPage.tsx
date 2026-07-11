@@ -3,7 +3,6 @@ import {
   createTask,
   createUser,
   deleteTask,
-  backfillSampleMetadata,
   fetchScenes,
   fetchUserStats,
   getToken,
@@ -47,7 +46,6 @@ export function AdminPage() {
   const [creatingTask, setCreatingTask] = useState(false);
   const [deleteTaskId, setDeleteTaskId] = useState("");
   const [deletingTask, setDeletingTask] = useState(false);
-  const [backfilling, setBackfilling] = useState(false);
 
   useEffect(() => {
     fetchUserStats().then(setUserStats).catch(console.error);
@@ -173,20 +171,6 @@ export function AdminPage() {
       setMessage(msg || "导入失败");
     } finally {
       setImporting(false);
-    }
-  };
-
-  const onBackfillMetadata = async () => {
-    setBackfilling(true);
-    setMessage("");
-    try {
-      const result = await backfillSampleMetadata();
-      setMessage(`已补写 ${result.backfilled_count} 条样本的场景元数据`);
-    } catch (err: unknown) {
-      const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
-      setMessage(msg || "补写失败");
-    } finally {
-      setBackfilling(false);
     }
   };
 
@@ -426,16 +410,11 @@ export function AdminPage() {
       <div className="card space-y-4">
         <h2 className="font-medium">交付物下载</h2>
         <p className="text-sm text-slate-400">
-          打包已通过样本的「待质检数据」和「质检结果」目录（含 report 与各 pass session 的 sample_metadata.json）
+          打包已通过样本的「待质检数据」和「质检结果」目录（含 report 与各 pass session 的 sample_metadata.json，入库时自动生成）
         </p>
-        <div className="flex flex-wrap gap-2">
-          <button className="btn btn-secondary" onClick={onBackfillMetadata} disabled={backfilling}>
-            {backfilling ? "补写中..." : "补写场景元数据"}
-          </button>
-          <button className="btn btn-primary" onClick={onDownloadZip}>
-            下载 ZIP
-          </button>
-        </div>
+        <button className="btn btn-primary" onClick={onDownloadZip}>
+          下载 ZIP
+        </button>
       </div>
     </div>
   );

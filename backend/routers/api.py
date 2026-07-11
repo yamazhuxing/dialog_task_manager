@@ -13,7 +13,6 @@ from backend.models import Sample, Submission, Task, User
 from backend.constants import SCENE_OPTIONS
 from backend.schemas import (
     DashboardStats,
-    MetadataBackfillResponse,
     QuestionImportResponse,
     SceneOption,
     SubmissionResponse,
@@ -26,11 +25,9 @@ from backend.schemas import (
 )
 from backend.services.pipeline import (
     PipelineError,
-    SAMPLE_METADATA_FILENAME,
     build_sample_metadata,
     persist_passed_sample,
     run_openclaw_pipeline,
-    write_sample_metadata,
 )
 from backend.services.questions import (
     create_delivery_zip,
@@ -380,44 +377,6 @@ async def import_questions_file(
     )
     total = db.query(Task).count()
     return QuestionImportResponse(imported_count=imported, skipped_count=skipped, total_tasks=total)
-
-
-@router.post("/samples/backfill-metadata", response_model=MetadataBackfillResponse)
-def backfill_sample_metadata(
-    db: Session = Depends(get_db),
-    _: User = Depends(require_admin),
-) -> MetadataBackfillResponse:
-    samples = db.query(Sample).all()
-    backfilled = 0
-    for sample in samples:
-        task = db.get(Task, sample.task_id)
-        if not task:
-            continue
-        metadata = build_sample_metadata(
-            task_id=task.id,
-            session_id=sample.session_id,
-            scene=sample.scene,
-            scene_label=task.scene_label,
-            topic=task.topic,
-            constraint_text=task.constraint_text,
-            source_type=sample.source_type,
-            model_version=sample.model_version,
-            detected_model=sample.detected_model,
-            difficulty=sample.difficulty,
-        )
-        pass_session_dir = Path(sample.qc_dir) / "openclaw-待质检数据-pass" / sample.session_id
-        convert_session_dir = Path(sample.convert_dir) / sample.session_id
-        wrote = False
-        if pass_session_dir.is_dir():
-            write_sample_metadata(pass_session_dir, metadata)
-            wrote = True
-        if convert_session_dir.is_dir():
-            convert_metadata = convert_session_dir / SAMPLE_METADATA_FILENAME
-            if convert_metadata.exists():
-                convert_metadata.unlink()
-        if wrote:
-            backfilled += 1
-    return MetadataBackfillResponse(backfilled_count=backfilled)
 
 
 @router.get("/delivery/zip")

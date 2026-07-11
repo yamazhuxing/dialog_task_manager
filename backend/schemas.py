@@ -140,7 +140,3 @@ class TaskCreateResponse(BaseModel):
 class TaskDeleteResponse(BaseModel):
     id: int
     message: str
-
-
-class MetadataBackfillResponse(BaseModel):
-    backfilled_count: int

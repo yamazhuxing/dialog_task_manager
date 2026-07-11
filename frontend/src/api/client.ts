@@ -176,8 +176,3 @@ export async function deleteTask(taskId: number) {
   const { data } = await api.delete(`/tasks/${taskId}`);
   return data;
 }
-
-export async function backfillSampleMetadata() {
-  const { data } = await api.post("/samples/backfill-metadata");
-  return data as { backfilled_count: number };
-}
