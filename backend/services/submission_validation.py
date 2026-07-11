@@ -9,8 +9,11 @@ from sqlalchemy.orm import Session
 
 from backend.models import Sample, Task
 
-SESSION_REUSED_MESSAGE = "上传失败，请更换对话文件后重试"
-CONTENT_MISMATCH_MESSAGE = "上传失败，请确认当前任务后重新上传"
+CONTENT_MISMATCH_MESSAGE = "上传失败：任务与对话文件不匹配，请更换对话文件后重试"
+
+
+def session_reused_message(existing_task_id: int) -> str:
+    return f"上传失败：该对话文件已被任务 #{existing_task_id} 使用，请重新制作后上传"
 
 
 class SubmissionValidationError(Exception):
@@ -58,8 +61,9 @@ def session_already_used(db: Session, session_id: str) -> Sample | None:
 
 
 def ensure_session_available(db: Session, session_id: str) -> None:
-    if session_already_used(db, session_id):
-        raise SubmissionValidationError(SESSION_REUSED_MESSAGE)
+    existing = session_already_used(db, session_id)
+    if existing:
+        raise SubmissionValidationError(session_reused_message(existing.task_id))
 
 
 def task_turn_texts(task: Task) -> list[str]:

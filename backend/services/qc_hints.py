@@ -24,14 +24,14 @@ _RULES: list[tuple[re.Pattern[str], str, str]] = [
         "追问逼出 write/exec，让至少一次 thinking 出现在 tool_result 之后",
     ),
     (
-        re.compile(r"上传失败，请确认当前任务"),
-        "提交未通过校验",
-        "请确认任务与文件后重新上传",
+        re.compile(r"任务与对话文件不匹配"),
+        "对话内容与当前领取的任务不一致",
+        "请确认领取的任务，按该任务提问后重新导出并上传",
     ),
     (
-        re.compile(r"上传失败，请更换对话文件"),
-        "提交未通过校验",
-        "请重新制作对话后上传",
+        re.compile(r"该对话文件已被任务"),
+        "该对话文件此前已提交并通过",
+        "请针对当前任务重新制作新对话，勿复用已提交文件",
     ),
     (
         re.compile(r"assistant turns", re.I),

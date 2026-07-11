@@ -31,7 +31,6 @@ from backend.services.pipeline import (
 )
 from backend.services.assistant_turns import turns_from_qc_stats
 from backend.services.submission_validation import (
-    SESSION_REUSED_MESSAGE,
     SubmissionValidationError,
     ensure_session_available,
     peek_session_id,
@@ -364,9 +363,9 @@ async def upload_task_file(
     try:
         peeked_session_id = peek_session_id(dest)
         ensure_session_available(db, peeked_session_id)
-    except SubmissionValidationError:
+    except SubmissionValidationError as exc:
         dest.unlink(missing_ok=True)
-        raise HTTPException(status_code=400, detail=SESSION_REUSED_MESSAGE) from None
+        raise HTTPException(status_code=400, detail=exc.message) from None
 
     submission = Submission(
         task_id=task.id,
