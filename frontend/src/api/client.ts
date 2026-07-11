@@ -67,6 +67,7 @@ export interface DashboardStats {
   scene_max_count: number;
   scene_covered_count: number;
   scene_total_count: number;
+  scene_range_ratio: number | null;
 }
 
 export async function login(username: string, password: string) {

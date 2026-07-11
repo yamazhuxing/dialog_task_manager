@@ -116,6 +116,7 @@ def get_dashboard_stats(db: Session) -> DashboardStats:
         scene_min >= 1
         and scene_max / scene_min < SCENE_RATIO_MAX
     )
+    scene_range_ratio = round(scene_max / scene_min, 2) if scene_min >= 1 else None
 
     openclaw = source_distribution.get("openclaw", 0)
     hermes = source_distribution.get("hermes", 0)
@@ -146,6 +147,7 @@ def get_dashboard_stats(db: Session) -> DashboardStats:
         scene_max_count=scene_max,
         scene_covered_count=scene_covered_count,
         scene_total_count=scene_total_count,
+        scene_range_ratio=scene_range_ratio,
     )
 
 

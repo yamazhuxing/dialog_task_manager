@@ -96,6 +96,7 @@ class DashboardStats(BaseModel):
     scene_max_count: int
     scene_covered_count: int
     scene_total_count: int = 13
+    scene_range_ratio: float | None = None
 
 
 class UserStatsItem(BaseModel):

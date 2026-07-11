@@ -69,6 +69,13 @@ export function DashboardPage() {
 
   if (!stats) return <div>加载中...</div>;
 
+  const sceneRangeLabel =
+    stats.scene_range_ratio != null ? `${stats.scene_range_ratio}` : "—";
+  const sceneRangeHint =
+    stats.scene_range_ratio != null
+      ? `单类最少 ${stats.scene_min_count} 条、最多 ${stats.scene_max_count} 条；极差比 max÷min = ${stats.scene_range_ratio}（要求 < 5）`
+      : `单类最少 ${stats.scene_min_count} 条、最多 ${stats.scene_max_count} 条；极差比待计算（13 类均需至少 1 条后才算 max÷min）`;
+
   return (
     <div className="space-y-6">
       <div>
@@ -85,9 +92,9 @@ export function DashboardPage() {
         <StatCard title="可领取任务" value={stats.available_count} />
         <StatCard title="制作中任务" value={stats.claimed_count} />
         <StatCard
-          title="场景覆盖 / 极差"
-          value={`${stats.scene_covered_count}/${stats.scene_total_count} 类 · ${stats.scene_min_count}~${stats.scene_max_count}`}
-          hint="13 类均需 ≥1 条，且最多/最少 < 5"
+          title="场景覆盖 / 极差比"
+          value={`已覆盖 ${stats.scene_covered_count}/${stats.scene_total_count} 类 · 极差 ${sceneRangeLabel}`}
+          hint={sceneRangeHint}
         />
       </div>
 
@@ -108,7 +115,7 @@ export function DashboardPage() {
           title="场景分布 (13 类)"
           data={stats.scene_distribution}
           ok={stats.scene_ratio_ok}
-          hint={`已覆盖 ${stats.scene_covered_count}/${stats.scene_total_count} 类；达标：每类 ≥1 条且 max/min < 5`}
+          hint={`已覆盖 ${stats.scene_covered_count}/${stats.scene_total_count} 类；极差比 max÷min ${stats.scene_range_ratio != null ? `= ${stats.scene_range_ratio}（< 5 达标）` : "待计算（每类需 ≥1 条）"}`}
         />
         <DistributionCard title="难度分布" data={stats.difficulty_distribution} />
       </div>
