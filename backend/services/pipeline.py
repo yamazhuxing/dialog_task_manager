@@ -7,7 +7,7 @@ from pathlib import Path
 
 from backend.config import Settings
 
-from backend.services.quality_report import refresh_delivery_report
+from backend.services.quality_report import refresh_delivery_report, remove_convert_metadata
 
 SAMPLE_METADATA_FILENAME = "sample_metadata.json"
 
@@ -202,9 +202,7 @@ def persist_passed_sample(
 
     # 场景元数据仅写入 pass 目录（待质检数据目录保持纯转换结果）
     write_sample_metadata(pass_session_master, metadata)
-    convert_metadata = convert_session_master / SAMPLE_METADATA_FILENAME
-    if convert_metadata.exists():
-        convert_metadata.unlink()
+    remove_convert_metadata(convert_master)
 
     if backup_root.exists():
         shutil.rmtree(backup_root)
