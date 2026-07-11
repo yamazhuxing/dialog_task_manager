@@ -98,23 +98,53 @@ cd frontend && npm install && npm run build && cd ..
 
 与开发环境相同，确保服务器可访问腾讯云 MySQL。
 
-### 3. 使用 systemd 运行（示例）
+### 3. 使用 systemd 常驻运行（生产推荐）
 
-```ini
-[Unit]
-Description=Make Sample Service
-After=network.target
+前台 `uv run python server.py` 适合开发调试；**Ctrl+C 或断开 SSH 会停止服务**。生产环境请用 systemd。
 
-[Service]
-User=www-data
-WorkingDirectory=/opt/make_sample_service
-EnvironmentFile=/opt/make_sample_service/.env
-ExecStart=/opt/make_sample_service/.venv/bin/uvicorn backend.app:app --host 0.0.0.0 --port 8005
-Restart=always
+**（1）确认前端已构建、`.env` 已配置**
 
-[Install]
-WantedBy=multi-user.target
+```bash
+cd /root/dialog_task_manager   # 换成你的实际目录
+grep APP_PORT .env             # 例如 APP_PORT=8005
+test -f static/index.html && echo "frontend OK" || (cd frontend && npm run build)
+chmod +x deploy/start.sh
 ```
+
+**（2）安装 systemd 单元**
+
+若项目不在 `/root/dialog_task_manager`，先改 `deploy/dialog-task-manager.service` 里的路径，再执行：
+
+```bash
+sudo cp deploy/dialog-task-manager.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable dialog-task-manager
+sudo systemctl start dialog-task-manager
+sudo systemctl status dialog-task-manager
+```
+
+**（3）常用运维命令**
+
+```bash
+sudo systemctl stop dialog-task-manager       # 停止
+sudo systemctl restart dialog-task-manager    # 重启（改 .env 后需执行）
+journalctl -u dialog-task-manager -f          # 实时日志
+journalctl -u dialog-task-manager -n 100      # 最近 100 行
+```
+
+**（4）更新代码后**
+
+```bash
+cd /root/dialog_task_manager
+git pull origin main
+uv sync
+cd frontend && npm install && npm run build && cd ..
+sudo systemctl restart dialog-task-manager
+```
+
+服务监听 `.env` 中的 `APP_PORT`（默认 8005），浏览器访问：`http://服务器IP:8005`。
+
+> 若之前用前台方式启动过，先 `Ctrl+C` 或 `pkill -f "uvicorn backend.app:app"`，再 `systemctl start`，避免端口冲突。
 
 ### 4. Nginx 反向代理（可选）
 

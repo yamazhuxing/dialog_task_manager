@@ -1,0 +1,22 @@
+[Unit]
+Description=Dialog Task Manager (sample production platform)
+After=network.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=/root/dialog_task_manager
+EnvironmentFile=/root/dialog_task_manager/.env
+ExecStart=/root/dialog_task_manager/deploy/start.sh
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+# Allow large sample uploads through the app (Nginx may also need client_max_body_size)
+LimitNOFILE=65535
+
+[Install]
+WantedBy=multi-user.target
