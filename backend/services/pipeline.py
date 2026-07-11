@@ -7,6 +7,8 @@ from pathlib import Path
 
 from backend.config import Settings
 
+from backend.services.quality_report import refresh_delivery_report
+
 SAMPLE_METADATA_FILENAME = "sample_metadata.json"
 
 
@@ -208,14 +210,7 @@ def persist_passed_sample(
         shutil.rmtree(backup_root)
     shutil.copytree(work_dir, backup_root)
 
-    report_src = result["qc_root"] / "openclaw-待质检数据-report"
-    report_dest = qc_master / "openclaw-待质检数据-report"
-    report_dest.mkdir(parents=True, exist_ok=True)
-    if report_src.exists():
-        for item in report_src.iterdir():
-            target = report_dest / item.name
-            if item.is_file():
-                shutil.copy2(item, target)
+    refresh_delivery_report(convert_master, qc_master)
 
     return {
         "raw_file": raw_dest,

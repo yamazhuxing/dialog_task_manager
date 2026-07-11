@@ -321,6 +321,111 @@ def validate_session(session_dir):
     return ok, errors, stats
 
 
+def write_quality_report(report_path: Path, input_dir: Path, results: list[dict]) -> None:
+    """写入与质检脚本一致的 report.txt。"""
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(report_path, "w", encoding="utf-8") as f:
+        f.write("=" * 60 + "\n")
+        f.write("质检报告\n")
+        f.write("=" * 60 + "\n\n")
+
+        f.write(f"输入目录: {input_dir}\n")
+        f.write(f"质检时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+        f.write(f"总有效 Session 数: {len(results)}\n\n")
+
+        pass_count = sum(1 for r in results if r["status"] == "pass")
+        fail_count = sum(1 for r in results if r["status"] == "fail")
+        error_count = sum(1 for r in results if r["status"] == "error")
+
+        f.write("-" * 60 + "\n")
+        f.write("汇总统计\n")
+        f.write("-" * 60 + "\n")
+        if results:
+            f.write(f"✓ 通过: {pass_count} ({pass_count / len(results) * 100:.1f}%)\n")
+            f.write(f"✗ 未通过: {fail_count} ({fail_count / len(results) * 100:.1f}%)\n")
+        else:
+            f.write("✓ 通过: 0 (0.0%)\n")
+            f.write("✗ 未通过: 0 (0.0%)\n")
+        if error_count > 0:
+            f.write(f"⚠ 错误: {error_count} ({error_count / len(results) * 100:.1f}%)\n")
+        f.write("\n")
+
+        if pass_count > 0:
+            f.write("-" * 60 + "\n")
+            f.write("通过的 Sessions\n")
+            f.write("-" * 60 + "\n")
+            for r in results:
+                if r["status"] == "pass":
+                    f.write(f"✓ {r['session_id']}\n")
+                    stats = r["stats"]
+                    f.write(f"   turns={stats.get('assistant_turns', 0)}, ")
+                    f.write(f"think_density={stats.get('think_density', 0):.1%}, ")
+                    f.write(f"tool_err={stats.get('tool_error_ratio', 0):.1%}\n")
+            f.write("\n")
+
+        if fail_count > 0:
+            f.write("-" * 60 + "\n")
+            f.write("未通过的 Sessions\n")
+            f.write("-" * 60 + "\n")
+            for r in results:
+                if r["status"] == "fail":
+                    f.write(f"✗ {r['session_id']}\n")
+                    f.write(f"   错误 ({len(r['errors'])}):\n")
+                    for e in r["errors"][:5]:
+                        f.write(f"     - {e}\n")
+                    if len(r["errors"]) > 5:
+                        f.write(f"     ... 还有 {len(r['errors']) - 5} 个错误\n")
+                    f.write("\n")
+
+        f.write("-" * 60 + "\n")
+        f.write("详细统计\n")
+        f.write("-" * 60 + "\n")
+
+        valid_results = [r for r in results if r["status"] in ("pass", "fail")]
+        if valid_results:
+            avg_turns = sum(r["stats"].get("assistant_turns", 0) for r in valid_results) / len(valid_results)
+            avg_think = sum(r["stats"].get("think_density", 0) for r in valid_results) / len(valid_results)
+            avg_tool_err = sum(r["stats"].get("tool_error_ratio", 0) for r in valid_results) / len(valid_results)
+            avg_cron = sum(r["stats"].get("cron_ratio", 0) for r in valid_results) / len(valid_results)
+
+            f.write(f"平均 assistant turns: {avg_turns:.1f}\n")
+            f.write(f"平均 thinking density: {avg_think:.1%}\n")
+            f.write(f"平均 tool error ratio: {avg_tool_err:.1%}\n")
+            f.write(f"平均 cron ratio: {avg_cron:.1%}\n")
+
+        f.write("\n" + "=" * 60 + "\n")
+        f.write("质检完成\n")
+        f.write("=" * 60 + "\n")
+
+
+def collect_validation_results(convert_dir: Path) -> list[dict]:
+    """对 convert 目录下所有 session 重新执行 validate_session，返回结果列表。"""
+    session_dirs = []
+    for item in convert_dir.iterdir():
+        if item.is_dir() and any(item.glob("*.json")):
+            session_dirs.append(item)
+
+    results: list[dict] = []
+    for session_dir in sorted(session_dirs):
+        session_id = session_dir.name
+        try:
+            ok, errors, stats = validate_session(session_dir)
+            status = "pass" if ok else "fail"
+        except Exception as exc:
+            status = "error"
+            errors = [str(exc)]
+            stats = {}
+        results.append(
+            {
+                "session_id": session_id,
+                "status": status,
+                "errors": errors,
+                "stats": stats,
+            }
+        )
+    return results
+
+
 def process_session_dir(session_dir, pass_dir, fail_dir):
     """
     处理一个 session 目录，执行质检并移动到对应的输出目录
@@ -464,80 +569,7 @@ def main():
     
     # 生成质检报告
     report_path = report_dir / "report.txt"
-    with open(report_path, "w", encoding="utf-8") as f:
-        f.write("=" * 60 + "\n")
-        f.write("质检报告\n")
-        f.write("=" * 60 + "\n\n")
-        
-        f.write(f"输入目录: {input_dir}\n")
-        f.write(f"质检时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-
-        f.write(f"总有效 Session 数: {len(results)}\n\n")
-        
-        # 汇总统计
-        pass_count = sum(1 for r in results if r["status"] == "pass")
-        fail_count = sum(1 for r in results if r["status"] == "fail")
-        error_count = sum(1 for r in results if r["status"] == "error")
-        
-        f.write("-" * 60 + "\n")
-        f.write("汇总统计\n")
-        f.write("-" * 60 + "\n")
-        f.write(f"✓ 通过: {pass_count} ({pass_count/len(results)*100:.1f}%)\n")
-        f.write(f"✗ 未通过: {fail_count} ({fail_count/len(results)*100:.1f}%)\n")
-        if error_count > 0:
-            f.write(f"⚠ 错误: {error_count} ({error_count/len(results)*100:.1f}%)\n")
-        f.write("\n")
-        
-        # 通过的 sessions
-        if pass_count > 0:
-            f.write("-" * 60 + "\n")
-            f.write("通过的 Sessions\n")
-            f.write("-" * 60 + "\n")
-            for r in results:
-                if r["status"] == "pass":
-                    f.write(f"✓ {r['session_id']}\n")
-                    stats = r["stats"]
-                    f.write(f"   turns={stats.get('assistant_turns', 0)}, ")
-                    f.write(f"think_density={stats.get('think_density', 0):.1%}, ")
-                    f.write(f"tool_err={stats.get('tool_error_ratio', 0):.1%}\n")
-            f.write("\n")
-        
-        # 未通过的 sessions
-        if fail_count > 0:
-            f.write("-" * 60 + "\n")
-            f.write("未通过的 Sessions\n")
-            f.write("-" * 60 + "\n")
-            for r in results:
-                if r["status"] == "fail":
-                    f.write(f"✗ {r['session_id']}\n")
-                    f.write(f"   错误 ({len(r['errors'])}):\n")
-                    for e in r["errors"][:5]:  # 最多显示5个错误
-                        f.write(f"     - {e}\n")
-                    if len(r["errors"]) > 5:
-                        f.write(f"     ... 还有 {len(r['errors']) - 5} 个错误\n")
-                    f.write("\n")
-        
-        # 详细统计
-        f.write("-" * 60 + "\n")
-        f.write("详细统计\n")
-        f.write("-" * 60 + "\n")
-        
-        # 计算平均值（只统计通过的和失败的，排除错误的）
-        valid_results = [r for r in results if r["status"] in ("pass", "fail")]
-        if valid_results:
-            avg_turns = sum(r["stats"].get("assistant_turns", 0) for r in valid_results) / len(valid_results)
-            avg_think = sum(r["stats"].get("think_density", 0) for r in valid_results) / len(valid_results)
-            avg_tool_err = sum(r["stats"].get("tool_error_ratio", 0) for r in valid_results) / len(valid_results)
-            avg_cron = sum(r["stats"].get("cron_ratio", 0) for r in valid_results) / len(valid_results)
-            
-            f.write(f"平均 assistant turns: {avg_turns:.1f}\n")
-            f.write(f"平均 thinking density: {avg_think:.1%}\n")
-            f.write(f"平均 tool error ratio: {avg_tool_err:.1%}\n")
-            f.write(f"平均 cron ratio: {avg_cron:.1%}\n")
-        
-        f.write("\n" + "=" * 60 + "\n")
-        f.write("质检完成\n")
-        f.write("=" * 60 + "\n")
+    write_quality_report(report_path, input_dir, results)
     
     print(f"\n[质检报告] 已生成 {report_path}")
     

@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from backend.config import Settings
 from backend.constants import MAX_TASK_TURNS, MIN_TASK_TURNS, SCENE_LABELS
 from backend.models import QuestionImport, Task, User
-from backend.services.pipeline import SAMPLE_METADATA_FILENAME
+from backend.services.quality_report import refresh_delivery_report
 
 
 def import_questions_from_data(
@@ -102,53 +102,6 @@ def create_single_task(db: Session, *, scene: str, topic: str, constraint_text: 
     return task
 
 
-def _refresh_delivery_report(convert_dir: Path, qc_dir: Path) -> Path:
-    """根据当前已通过样本汇总生成/更新交付用 report.txt。"""
-    report_dir = qc_dir / "openclaw-待质检数据-report"
-    pass_dir = qc_dir / "openclaw-待质检数据-pass"
-    report_dir.mkdir(parents=True, exist_ok=True)
-    report_path = report_dir / "report.txt"
-
-    pass_sessions = sorted([d for d in pass_dir.iterdir() if d.is_dir()]) if pass_dir.exists() else []
-    lines = [
-        "=" * 60,
-        "质检报告（交付汇总）",
-        "=" * 60,
-        "",
-        f"生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
-        f"待质检数据目录: {convert_dir}",
-        f"已通过 Session 数: {len(pass_sessions)}",
-        "",
-        "-" * 60,
-        "通过的 Sessions",
-        "-" * 60,
-    ]
-
-    for session_dir in pass_sessions:
-        session_id = session_dir.name
-        convert_session = convert_dir / session_id
-        turn_count = len(list(convert_session.glob("*.json"))) if convert_session.is_dir() else 0
-        difficulty = "unknown"
-        justification_file = session_dir / "task_difficulty_justification.json"
-        if justification_file.exists():
-            data = json.loads(justification_file.read_text(encoding="utf-8"))
-            difficulty = data.get("task_difficulty") or difficulty
-
-        scene_label = ""
-        metadata_file = session_dir / SAMPLE_METADATA_FILENAME
-        if metadata_file.exists():
-            metadata = json.loads(metadata_file.read_text(encoding="utf-8"))
-            scene_label = metadata.get("scene_label") or metadata.get("scene") or ""
-
-        label_suffix = f" [{scene_label}]" if scene_label else ""
-        lines.append(f"✓ {session_id}{label_suffix}")
-        lines.append(f"   turns={turn_count}, difficulty={difficulty}")
-
-    lines.extend(["", "=" * 60, ""])
-    report_path.write_text("\n".join(lines), encoding="utf-8")
-    return report_path
-
-
 def create_delivery_zip(settings: Settings) -> Path:
     samples_dir = settings.samples_dir
     convert_dir = samples_dir / "openclaw-待质检数据"
@@ -160,7 +113,7 @@ def create_delivery_zip(settings: Settings) -> Path:
     if not pass_dir.exists() or not any(d.is_dir() for d in pass_dir.iterdir()):
         raise FileNotFoundError("暂无已通过样本，请先完成至少一条通过样本")
 
-    _refresh_delivery_report(convert_dir, qc_dir)
+    refresh_delivery_report(convert_dir, qc_dir)
 
     zip_path = settings.data_dir / f"delivery_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip"
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
