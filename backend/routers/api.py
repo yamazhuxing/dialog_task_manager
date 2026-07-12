@@ -130,7 +130,9 @@ def list_tasks(
         query = query.filter(Task.scene == scene)
     if mine:
         query = query.filter(Task.claimed_by_id == user.id)
-    tasks = query.order_by(Task.id.asc()).all()
+        tasks = query.order_by(Task.claimed_at.desc().nullslast(), Task.id.desc()).all()
+    else:
+        tasks = query.order_by(Task.id.asc()).all()
     return [task_to_list_item(task) for task in tasks]
 
 

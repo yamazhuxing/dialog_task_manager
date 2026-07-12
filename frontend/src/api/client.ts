@@ -39,6 +39,8 @@ export interface TaskItem {
   topic: string;
   status: string;
   claimed_by: string | null;
+  claimed_at: string | null;
+  passed_at: string | null;
   source_type: string | null;
   model_version: string | null;
   turn_count: number;

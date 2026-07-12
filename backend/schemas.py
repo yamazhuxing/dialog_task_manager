@@ -44,6 +44,8 @@ class TaskListItem(BaseModel):
     topic: str
     status: str
     claimed_by: str | None = None
+    claimed_at: datetime | None = None
+    passed_at: datetime | None = None
     source_type: str | None = None
     model_version: str | None = None
     turn_count: int

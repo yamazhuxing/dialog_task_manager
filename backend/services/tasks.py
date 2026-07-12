@@ -25,6 +25,8 @@ def task_to_list_item(task: Task) -> TaskListItem:
         topic=task.topic,
         status=task.status,
         claimed_by=claimer,
+        claimed_at=task.claimed_at,
+        passed_at=task.passed_at,
         source_type=task.source_type,
         model_version=task.model_version,
         turn_count=len(turns),

@@ -2,6 +2,17 @@ import React, { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { TaskItem, fetchTasks } from "../api/client";
 
+function formatDateTime(value: string | null) {
+  if (!value) return null;
+  return new Date(value).toLocaleString("zh-CN", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
 export function MyTasksPage() {
   const [tasks, setTasks] = useState<TaskItem[]>([]);
 
@@ -24,6 +35,8 @@ export function MyTasksPage() {
               </div>
               <div className="mt-1 text-sm text-slate-400">
                 {task.scene_label} · {task.status === "passed" ? "已通过" : "制作中"}
+                {task.claimed_at && ` · 领取于 ${formatDateTime(task.claimed_at)}`}
+                {task.status === "passed" && task.passed_at && ` · 通过于 ${formatDateTime(task.passed_at)}`}
               </div>
             </div>
             <Link className="btn btn-primary" to={`/tasks/${task.id}`}>
