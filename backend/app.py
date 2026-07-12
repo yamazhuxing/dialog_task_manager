@@ -135,6 +135,10 @@ def create_app() -> FastAPI:
         async def spa_fallback(full_path: str):
             if full_path.startswith("api/"):
                 return {"detail": "Not Found"}
+            if full_path:
+                static_file = static_dir / full_path
+                if static_file.is_file():
+                    return FileResponse(static_file)
             index = static_dir / "index.html"
             if index.exists():
                 return FileResponse(index)
