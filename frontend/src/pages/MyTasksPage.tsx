@@ -15,9 +15,20 @@ function formatDateTime(value: string | null) {
 
 export function MyTasksPage() {
   const [tasks, setTasks] = useState<TaskItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
 
   useEffect(() => {
-    fetchTasks({ mine: true } as Record<string, boolean>).then(setTasks).catch(console.error);
+    setLoading(true);
+    setError("");
+    fetchTasks({ mine: true } as Record<string, boolean>)
+      .then(setTasks)
+      .catch((err: unknown) => {
+        const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+        setError(typeof msg === "string" ? msg : "加载任务失败，请刷新重试");
+        setTasks([]);
+      })
+      .finally(() => setLoading(false));
   }, []);
 
   return (
@@ -26,8 +37,12 @@ export function MyTasksPage() {
         <h1 className="text-2xl font-semibold">我的任务</h1>
         <p className="mt-1 text-sm text-slate-400">查看已领取任务并进入提交页面</p>
       </div>
+      {error && <div className="rounded-xl bg-rose-500/10 px-3 py-2 text-sm text-rose-200">{error}</div>}
+
       <div className="space-y-3">
-        {tasks.map((task) => (
+        {loading && <div className="card text-slate-400">加载中...</div>}
+        {!loading &&
+          tasks.map((task) => (
           <div key={task.id} className="card flex items-center justify-between">
             <div>
               <div className="font-medium">
@@ -44,7 +59,9 @@ export function MyTasksPage() {
             </Link>
           </div>
         ))}
-        {tasks.length === 0 && <div className="card text-slate-400">你还没有领取任务</div>}
+        {!loading && !error && tasks.length === 0 && (
+          <div className="card text-slate-400">你还没有领取任务</div>
+        )}
       </div>
     </div>
   );

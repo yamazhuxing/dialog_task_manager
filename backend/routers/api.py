@@ -130,7 +130,8 @@ def list_tasks(
         query = query.filter(Task.scene == scene)
     if mine:
         query = query.filter(Task.claimed_by_id == user.id)
-        tasks = query.order_by(Task.claimed_at.desc().nullslast(), Task.id.desc()).all()
+        # MySQL 不支持 NULLS LAST，用 is_(None) 把无领取时间的记录排到末尾
+        tasks = query.order_by(Task.claimed_at.is_(None), Task.claimed_at.desc(), Task.id.desc()).all()
     else:
         tasks = query.order_by(Task.id.asc()).all()
     return [task_to_list_item(task) for task in tasks]
