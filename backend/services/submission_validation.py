@@ -10,6 +10,18 @@ from sqlalchemy.orm import Session
 from backend.models import Sample, Task
 
 CONTENT_MISMATCH_MESSAGE = "上传失败：任务与对话文件不匹配，请更换对话文件后重试"
+
+
+def source_extension_mismatch_message(source_type: str, filename: str) -> str | None:
+    """所选来源与文件扩展名不一致时返回提示文案。"""
+    lower = filename.lower()
+    if source_type == "openclaw" and not lower.endswith(".jsonl"):
+        return "上传失败：来源与文件扩展名不一致，OpenClaw 请上传 .jsonl 文件"
+    if source_type == "hermes" and not lower.endswith(".json"):
+        return "上传失败：来源与文件扩展名不一致，Hermes 请上传 .json 文件"
+    return None
+
+
 DETECTED_MODEL_MAP = {
     "claude-opus-4-6-thinking": "claude-opus-4-6",
     "claude-opus-4-6": "claude-opus-4-6",

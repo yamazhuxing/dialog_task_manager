@@ -35,6 +35,7 @@ from backend.services.submission_validation import (
     SubmissionValidationError,
     ensure_session_available,
     peek_session_id,
+    source_extension_mismatch_message,
 )
 from backend.services.qc_hints import build_qc_hints
 from backend.services.submission_progress import (
@@ -349,12 +350,12 @@ async def upload_task_file(
         raise HTTPException(status_code=400, detail="来源类型无效")
     if source_type == "openclaw":
         filename = file.filename or "upload.jsonl"
-        if not filename.endswith(".jsonl"):
-            raise HTTPException(status_code=400, detail="OpenClaw 文件必须是 .jsonl 格式")
     else:
         filename = file.filename or "upload.json"
-        if not filename.endswith(".json"):
-            raise HTTPException(status_code=400, detail="Hermes 文件必须是 .json 格式")
+
+    mismatch = source_extension_mismatch_message(source_type, filename)
+    if mismatch:
+        raise HTTPException(status_code=400, detail=mismatch)
 
     upload_dir = settings.uploads_dir / str(user.id) / str(task_id)
     upload_dir.mkdir(parents=True, exist_ok=True)
