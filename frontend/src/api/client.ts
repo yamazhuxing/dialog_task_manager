@@ -132,7 +132,7 @@ export interface Submission {
   task_id: number;
   status: string;
   source_type: string;
-  model_version: string;
+  model_version: string | null;
   session_id: string | null;
   detected_model: string | null;
   difficulty: string | null;
@@ -145,16 +145,10 @@ export interface Submission {
   created_at: string;
 }
 
-export async function uploadTaskFile(
-  taskId: number,
-  file: File,
-  sourceType: string,
-  modelVersion: string,
-) {
+export async function uploadTaskFile(taskId: number, file: File, sourceType: string) {
   const form = new FormData();
   form.append("file", file);
   form.append("source_type", sourceType);
-  form.append("model_version", modelVersion);
   const { data } = await api.post<Submission>(`/tasks/${taskId}/upload`, form);
   return data;
 }

@@ -34,4 +34,7 @@ static/
 # Local pipeline output (keep sample/openclaw raw input as demo)
 sample/openclaw-待质检数据/
 sample/openclaw-待质检数据-质检结果/
+sample/hermes-待质检数据/
+sample/hermes-待质检数据-质检结果/
 data/processing/
+data/test_*/

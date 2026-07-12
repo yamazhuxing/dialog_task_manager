@@ -10,6 +10,7 @@ from backend.config import Settings
 from backend.constants import MAX_TASK_TURNS, MIN_TASK_TURNS, SCENE_LABELS
 from backend.models import QuestionImport, Task, User
 from backend.services.quality_report import refresh_delivery_report
+from backend.services.sample_paths import iter_delivery_sources
 
 
 def import_questions_from_data(
@@ -104,23 +105,24 @@ def create_single_task(db: Session, *, scene: str, topic: str, constraint_text: 
 
 def create_delivery_zip(settings: Settings) -> Path:
     samples_dir = settings.samples_dir
-    convert_dir = samples_dir / "openclaw-待质检数据"
-    qc_dir = samples_dir / "openclaw-待质检数据-质检结果"
-    if not convert_dir.exists() or not qc_dir.exists():
-        raise FileNotFoundError("暂无可交付的样本目录，请先完成至少一条通过样本")
-
-    pass_dir = qc_dir / "openclaw-待质检数据-pass"
-    if not pass_dir.exists() or not any(d.is_dir() for d in pass_dir.iterdir()):
+    delivery_sources = iter_delivery_sources(samples_dir)
+    if not delivery_sources:
         raise FileNotFoundError("暂无已通过样本，请先完成至少一条通过样本")
 
-    refresh_delivery_report(convert_dir, qc_dir)
+    zip_entries: list[tuple[str, Path]] = []
+    for paths in delivery_sources:
+        if not paths.convert_dir.exists() or not paths.qc_dir.exists():
+            continue
+        refresh_delivery_report(paths.convert_dir, paths.qc_dir)
+        zip_entries.append((paths.convert_dir.name, paths.convert_dir))
+        zip_entries.append((paths.qc_dir.name, paths.qc_dir))
+
+    if not zip_entries:
+        raise FileNotFoundError("暂无可交付的样本目录，请先完成至少一条通过样本")
 
     zip_path = settings.data_dir / f"delivery_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip"
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
-        for root_name, folder in (
-            ("openclaw-待质检数据", convert_dir),
-            ("openclaw-待质检数据-质检结果", qc_dir),
-        ):
+        for root_name, folder in zip_entries:
             for file_path in folder.rglob("*"):
                 if file_path.is_file():
                     arcname = f"{root_name}/{file_path.relative_to(folder).as_posix()}"

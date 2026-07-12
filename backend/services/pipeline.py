@@ -10,10 +10,12 @@ from collections.abc import Callable
 from backend.config import Settings
 
 from backend.services.quality_report import refresh_delivery_report, remove_convert_metadata
+from backend.services.sample_paths import SourceSamplePaths, delivery_report_path
 from backend.models import Task
 from backend.services.submission_validation import (
     SubmissionValidationError,
     ensure_dialogue_matches_task,
+    model_version_from_detected,
     sample_storage_dir_name,
 )
 
@@ -35,7 +37,11 @@ class PipelineError(Exception):
         self.qc_stats = qc_stats or {}
 
 
-def _collect_qc_failure_details(convert_session_dir: Path, work_dir: Path, session_id: str) -> tuple[list[str], dict]:
+def _collect_qc_failure_details(
+    convert_session_dir: Path,
+    paths: SourceSamplePaths,
+    session_id: str,
+) -> tuple[list[str], dict]:
     """质检未通过时收集具体报错（复用 validate_session，不修改验收标准）。"""
     from quality_check import validate_session
 
@@ -47,12 +53,7 @@ def _collect_qc_failure_details(convert_session_dir: Path, work_dir: Path, sessi
         errors = [str(exc)]
 
     if not errors:
-        fail_csv = (
-            work_dir
-            / "openclaw-待质检数据-质检结果"
-            / "openclaw-待质检数据-fail"
-            / "failures.csv"
-        )
+        fail_csv = paths.fail_dir / "failures.csv"
         if fail_csv.exists():
             import csv
 
@@ -85,8 +86,7 @@ def _run_script(settings: Settings, script: str, args: list[str]) -> None:
 
 def _read_report_stats(pass_session_dir: Path) -> dict:
     qc_root = pass_session_dir.parent
-    report_dir = qc_root / f"{pass_session_dir.parent.name.replace('-pass', '')}-report"
-    report_file = report_dir / "report.txt"
+    report_file = delivery_report_path(qc_root)
     stats = {}
     if report_file.exists():
         text = report_file.read_text(encoding="utf-8", errors="replace")
@@ -108,6 +108,17 @@ def _read_difficulty(pass_session_dir: Path) -> tuple[str | None, str | None]:
     return data.get("task_difficulty"), data.get("justification")
 
 
+def _resolve_model_version(detected_model: str | None, session_id: str) -> str:
+    model_version = model_version_from_detected(detected_model)
+    if not model_version:
+        label = detected_model or "未知"
+        raise PipelineError(
+            f"无法识别模型版本（检测到: {label}，仅支持 Claude Opus 4.6 / 4.8）",
+            session_id=session_id,
+        )
+    return model_version
+
+
 def _detect_model(convert_session_dir: Path) -> str | None:
     json_files = sorted(convert_session_dir.glob("*.json"))
     if not json_files:
@@ -116,10 +127,13 @@ def _detect_model(convert_session_dir: Path) -> str | None:
     return data.get("request", {}).get("model") or data.get("model")
 
 
-def run_openclaw_pipeline(
+def run_sample_pipeline(
     settings: Settings,
     uploaded_file: Path,
     work_dir: Path,
+    *,
+    source_type: str,
+    convert_script: str,
     on_progress: Callable[[str, str, str], None] | None = None,
     task: Task | None = None,
     validate_session_id: Callable[[str], None] | None = None,
@@ -137,13 +151,14 @@ def run_openclaw_pipeline(
     target_file = input_dir / uploaded_file.name
     shutil.copy2(uploaded_file, target_file)
 
-    convert_dir = work_dir / "openclaw-待质检数据"
-    pass_dir = work_dir / "openclaw-待质检数据-质检结果" / "openclaw-待质检数据-pass"
+    paths = SourceSamplePaths.from_root(work_dir, source_type)
+    convert_dir = paths.convert_dir
+    pass_dir = paths.pass_dir
 
     progress("convert", "正在执行格式转换...")
     _run_script(
         settings,
-        "convert_openclaw.py",
+        convert_script,
         ["--input_dir", str(input_dir), "--output_dir", str(convert_dir)],
     )
     progress("convert", "格式转换完成", "done")
@@ -154,6 +169,8 @@ def run_openclaw_pipeline(
 
     session_id = session_dirs[0].name
     session_dir = convert_dir / session_id
+    detected_model = _detect_model(session_dir)
+    model_version = _resolve_model_version(detected_model, session_id)
 
     if validate_session_id:
         validate_session_id(session_id)
@@ -170,7 +187,7 @@ def run_openclaw_pipeline(
 
     pass_session_dir = pass_dir / session_id
     if not pass_session_dir.exists():
-        errors, qc_stats = _collect_qc_failure_details(session_dir, work_dir, session_id)
+        errors, qc_stats = _collect_qc_failure_details(session_dir, paths, session_id)
         progress("quality_check", "质量检测未通过", "failed")
         raise PipelineError(
             "质检未通过",
@@ -195,20 +212,62 @@ def run_openclaw_pipeline(
     )
     progress("difficulty", "难度评级完成", "done")
 
-    detected_model = _detect_model(session_dir)
     difficulty, justification = _read_difficulty(pass_session_dir)
     qc_stats = _read_report_stats(pass_session_dir)
 
     return {
         "session_id": session_id,
         "detected_model": detected_model,
+        "model_version": model_version,
         "difficulty": difficulty,
         "justification": justification,
         "qc_stats": qc_stats,
         "convert_dir": convert_dir,
-        "qc_root": pass_dir.parent,
+        "qc_root": paths.qc_dir,
+        "source_type": source_type,
+        "sample_paths": paths,
         "pass_session_dir": pass_session_dir,
     }
+
+
+def run_openclaw_pipeline(
+    settings: Settings,
+    uploaded_file: Path,
+    work_dir: Path,
+    on_progress: Callable[[str, str, str], None] | None = None,
+    task: Task | None = None,
+    validate_session_id: Callable[[str], None] | None = None,
+) -> dict:
+    return run_sample_pipeline(
+        settings,
+        uploaded_file,
+        work_dir,
+        source_type="openclaw",
+        convert_script="convert_openclaw.py",
+        on_progress=on_progress,
+        task=task,
+        validate_session_id=validate_session_id,
+    )
+
+
+def run_hermes_pipeline(
+    settings: Settings,
+    uploaded_file: Path,
+    work_dir: Path,
+    on_progress: Callable[[str, str, str], None] | None = None,
+    task: Task | None = None,
+    validate_session_id: Callable[[str], None] | None = None,
+) -> dict:
+    return run_sample_pipeline(
+        settings,
+        uploaded_file,
+        work_dir,
+        source_type="hermes",
+        convert_script="convert_hermes.py",
+        on_progress=on_progress,
+        task=task,
+        validate_session_id=validate_session_id,
+    )
 
 
 def write_sample_metadata(session_dir: Path, metadata: dict) -> Path:
@@ -258,21 +317,20 @@ def persist_passed_sample(
     metadata: dict,
 ) -> dict[str, Path]:
     samples_root = settings.samples_dir
-    openclaw_raw = samples_root / "openclaw"
-    convert_master = samples_root / "openclaw-待质检数据"
-    qc_master = samples_root / "openclaw-待质检数据-质检结果"
-    pass_master = qc_master / "openclaw-待质检数据-pass"
+    source_type = metadata.get("source_type", "openclaw")
+    paths = SourceSamplePaths.from_root(samples_root, source_type)
+    raw_ext = ".json" if source_type == "hermes" else ".jsonl"
     backup_root = settings.backups_dir / f"task_{task_id}_{session_id}"
 
-    for path in (openclaw_raw, convert_master, pass_master, backup_root):
+    for path in (paths.raw_dir, paths.convert_dir, paths.pass_dir, backup_root):
         path.mkdir(parents=True, exist_ok=True)
 
-    raw_dest = openclaw_raw / f"{task_id}_{session_id}.jsonl"
+    raw_dest = paths.raw_dir / f"{task_id}_{session_id}{raw_ext}"
     shutil.copy2(uploaded_file, raw_dest)
 
     storage_name = sample_storage_dir_name(task_id, session_id)
-    convert_session_master = convert_master / storage_name
-    pass_session_master = pass_master / storage_name
+    convert_session_master = paths.convert_dir / storage_name
+    pass_session_master = paths.pass_dir / storage_name
     for dest in (convert_session_master, pass_session_master):
         if dest.exists():
             shutil.rmtree(dest)
@@ -282,17 +340,17 @@ def persist_passed_sample(
 
     # 场景元数据仅写入 pass 目录（待质检数据目录保持纯转换结果）
     write_sample_metadata(pass_session_master, metadata)
-    remove_convert_metadata(convert_master)
+    remove_convert_metadata(paths.convert_dir)
 
     if backup_root.exists():
         shutil.rmtree(backup_root)
     shutil.copytree(work_dir, backup_root)
 
-    refresh_delivery_report(convert_master, qc_master)
+    refresh_delivery_report(paths.convert_dir, paths.qc_dir)
 
     return {
         "raw_file": raw_dest,
-        "convert_dir": convert_master,
-        "qc_dir": qc_master,
+        "convert_dir": paths.convert_dir,
+        "qc_dir": paths.qc_dir,
         "backup_dir": backup_root,
     }

@@ -455,7 +455,7 @@ export function AdminPage() {
       <div className="card space-y-4">
         <h2 className="font-medium">交付物下载</h2>
         <p className="text-sm text-slate-400">
-          打包已通过样本的「待质检数据」和「质检结果」目录（含 report 与各 pass session 的 sample_metadata.json，入库时自动生成）
+          打包 OpenClaw 与 Hermes 各自的「待质检数据」和「质检结果」目录（有通过样本的来源会包含；含 report 与 sample_metadata.json）
         </p>
         <button className="btn btn-primary" onClick={onDownloadZip}>
           下载 ZIP

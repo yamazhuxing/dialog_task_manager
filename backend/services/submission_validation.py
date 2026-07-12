@@ -10,6 +10,31 @@ from sqlalchemy.orm import Session
 from backend.models import Sample, Task
 
 CONTENT_MISMATCH_MESSAGE = "上传失败：任务与对话文件不匹配，请更换对话文件后重试"
+DETECTED_MODEL_MAP = {
+    "claude-opus-4-6-thinking": "claude-opus-4-6",
+    "claude-opus-4-6": "claude-opus-4-6",
+    "claude-opus-4-8-thinking": "claude-opus-4-8",
+    "claude-opus-4-8": "claude-opus-4-8",
+}
+
+MODEL_VERSION_MAP = {
+    "claude-opus-4-6": "opus-4.6",
+    "claude-opus-4-8": "opus-4.8",
+}
+
+
+def normalize_detected_model(raw: str | None) -> str | None:
+    if not raw:
+        return None
+    text = raw.strip()
+    return DETECTED_MODEL_MAP.get(text, text)
+
+
+def model_version_from_detected(raw: str | None) -> str | None:
+    normalized = normalize_detected_model(raw)
+    if not normalized:
+        return None
+    return MODEL_VERSION_MAP.get(normalized)
 
 
 def session_reused_message(existing_task_id: int) -> str:
@@ -30,10 +55,25 @@ def sample_storage_dir_name(task_id: int, session_id: str) -> str:
     return f"{task_id}_{session_id}"
 
 
-def peek_session_id(jsonl_path: Path) -> str:
-    session_id = jsonl_path.stem
+def peek_session_id(file_path: Path) -> str:
+    suffix = file_path.suffix.lower()
+    if suffix == ".json":
+        try:
+            data = json.loads(file_path.read_text(encoding="utf-8", errors="replace"))
+        except (OSError, json.JSONDecodeError):
+            data = None
+        if isinstance(data, dict):
+            session_id = data.get("id")
+            if isinstance(session_id, str) and session_id.strip():
+                return session_id.strip()
+        stem = file_path.stem
+        if stem.startswith("session-"):
+            return stem[len("session-") :]
+        return stem
+
+    session_id = file_path.stem
     try:
-        text = jsonl_path.read_text(encoding="utf-8", errors="replace")
+        text = file_path.read_text(encoding="utf-8", errors="replace")
     except OSError:
         return session_id
 

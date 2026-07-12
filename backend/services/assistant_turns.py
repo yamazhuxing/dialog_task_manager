@@ -9,6 +9,7 @@ from pathlib import Path
 
 from backend.models import Sample, Submission
 
+from backend.services.sample_paths import delivery_report_path
 from backend.services.submission_validation import sample_storage_dir_name
 
 TURN_BUCKETS: list[tuple[str, str]] = [
@@ -58,8 +59,13 @@ def resolve_session_dir(convert_dir: str, sample: Sample) -> Path | None:
 
 
 def turns_from_report(qc_dir: str, session_id: str, task_id: int | None = None) -> int | None:
-    report = Path(qc_dir) / "openclaw-待质检数据-report" / "report.txt"
-    if not report.exists():
+    qc_path = Path(qc_dir)
+    report_candidates = [
+        delivery_report_path(qc_path),
+        qc_path / "openclaw-待质检数据-report" / "report.txt",
+    ]
+    report = next((path for path in report_candidates if path.exists()), None)
+    if report is None:
         return None
     markers = [session_id]
     if task_id is not None:

@@ -83,7 +83,7 @@ class SubmissionResponse(BaseModel):
     task_id: int
     status: str
     source_type: str
-    model_version: str
+    model_version: str | None = None
     session_id: str | None = None
     detected_model: str | None = None
     difficulty: str | None = None

@@ -78,6 +78,24 @@ Provide your response strictly in the following JSON format. Do not include mark
 }}
 """
 
+def parse_call_timestamp(raw_ts) -> float:
+    """解析 call 文件 timestamp，返回可用于比较的 Unix 秒。"""
+    if raw_ts is None:
+        return float("-inf")
+    if isinstance(raw_ts, (int, float)):
+        return raw_ts / 1000 if raw_ts > 1e12 else float(raw_ts)
+    if isinstance(raw_ts, str):
+        text = raw_ts.strip()
+        if not text:
+            return float("-inf")
+        try:
+            dt = datetime.fromisoformat(text.replace("Z", "+00:00"))
+            return dt.timestamp()
+        except ValueError:
+            return float("-inf")
+    return float("-inf")
+
+
 def find_last_call_file(session_dir: Path):
     DEFAULT_TS = float("-inf")
 
@@ -85,19 +103,15 @@ def find_last_call_file(session_dir: Path):
     max_ts = DEFAULT_TS
 
     for f in session_dir.glob("*.json"):
+        if f.name == "task_difficulty_justification.json":
+            continue
         try:
             with f.open(encoding="utf-8") as fp:
-                ts_str = json.load(fp).get("timestamp")
-                if not isinstance(ts_str, str):
-                    continue
-
-                dt = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
-                ts = dt.timestamp()
-
+                ts = parse_call_timestamp(json.load(fp).get("timestamp"))
                 if ts > max_ts:
                     max_ts = ts
                     last_file = f
-        except (OSError, ValueError, KeyError, TypeError):
+        except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError):
             continue
 
     return last_file
@@ -135,6 +149,7 @@ def main():
         if not last_call:
             diff = "无call文件"
             reply = "无可用call文件"
+            justification = "未找到可用的 call 文件（timestamp 无效或目录为空）"
             status = "failed"
             print(f"⚠️  跳过：无call文件")
         else:

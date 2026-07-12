@@ -141,7 +141,6 @@ export function TaskDetailPage() {
   const [task, setTask] = useState<TaskDetail | null>(null);
   const [message, setMessage] = useState("");
   const [sourceType, setSourceType] = useState("openclaw");
-  const [modelVersion, setModelVersion] = useState("opus-4.8");
   const [file, setFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
   const [pollingId, setPollingId] = useState<number | null>(null);
@@ -216,7 +215,7 @@ export function TaskDetailPage() {
     setUploading(true);
     setMessage("文件已上传，正在后台处理...");
     try {
-      const submission = await uploadTaskFile(taskId, file, sourceType, modelVersion);
+      const submission = await uploadTaskFile(taskId, file, sourceType);
       setActiveSubmission(submission);
       setPollingId(submission.id);
     } catch (err: unknown) {
@@ -304,27 +303,29 @@ export function TaskDetailPage() {
           <div className="grid gap-4 md:grid-cols-2">
             <div>
               <label className="mb-1 block text-sm text-slate-400">来源</label>
-              <select className="select" value={sourceType} onChange={(e) => setSourceType(e.target.value)}>
+              <select
+                className="select"
+                value={sourceType}
+                onChange={(e) => {
+                  setSourceType(e.target.value);
+                  setFile(null);
+                }}
+              >
                 <option value="openclaw">OpenClaw</option>
-                <option value="hermes" disabled>
-                  Hermes（第一期暂未开放）
-                </option>
+                <option value="hermes">Hermes</option>
               </select>
-            </div>
-            <div>
-              <label className="mb-1 block text-sm text-slate-400">模型版本</label>
-              <select className="select" value={modelVersion} onChange={(e) => setModelVersion(e.target.value)}>
-                <option value="opus-4.8">Claude Opus 4.8</option>
-                <option value="opus-4.6">Claude Opus 4.6</option>
-              </select>
+              <p className="mt-2 text-xs text-slate-500">模型版本将根据上传文件自动识别（Opus 4.6 / 4.8）</p>
             </div>
           </div>
           <div>
-            <label className="mb-1 block text-sm text-slate-400">原始文件 (.jsonl)</label>
+            <label className="mb-1 block text-sm text-slate-400">
+              原始文件 ({sourceType === "hermes" ? ".json" : ".jsonl"})
+            </label>
             <input
               className="input"
               type="file"
-              accept=".jsonl"
+              accept={sourceType === "hermes" ? ".json" : ".jsonl"}
+              key={sourceType}
               onChange={(e) => setFile(e.target.files?.[0] || null)}
             />
           </div>
@@ -361,7 +362,9 @@ export function TaskDetailPage() {
           {activeSubmission.status === "passed" && activeSubmission.difficulty && (
             <div className="rounded-xl bg-cyan-500/10 px-4 py-3 text-sm text-cyan-200">
               难度评级：{activeSubmission.difficulty}
-              {activeSubmission.detected_model ? ` · 检测模型：${activeSubmission.detected_model}` : ""}
+              {activeSubmission.model_version || activeSubmission.detected_model
+                ? ` · 模型：${activeSubmission.model_version === "opus-4.8" ? "Opus 4.8" : activeSubmission.model_version === "opus-4.6" ? "Opus 4.6" : activeSubmission.detected_model}`
+                : ""}
             </div>
           )}
           {activeSubmission.status === "failed" && (

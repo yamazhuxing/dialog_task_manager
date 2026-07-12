@@ -44,6 +44,25 @@ BUILTIN_TOOLS = {
 }
 
 
+def normalize_timestamp(raw_ts) -> str:
+    """将 Hermes 时间戳统一为 ISO-8601 字符串（与 OpenClaw 转换结果一致）。"""
+    if raw_ts is None:
+        return datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+    if isinstance(raw_ts, (int, float)):
+        seconds = raw_ts / 1000 if raw_ts > 1e12 else raw_ts
+        return (
+            datetime.fromtimestamp(seconds, tz=timezone.utc)
+            .isoformat(timespec="milliseconds")
+            .replace("+00:00", "Z")
+        )
+    if isinstance(raw_ts, str):
+        text = raw_ts.strip()
+        if not text:
+            return datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+        return text if text.endswith("Z") else text + "Z"
+    return datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+
 def extract_system_prompt(hermes_data):
     """从 Hermes 数据中提取 system prompt"""
     return hermes_data.get("system_prompt", "You are a helpful AI assistant.")
@@ -185,7 +204,13 @@ def process_hermes_json(json_path, system_prompt):
         model_config = {}
     
     reasoning_config = model_config.get("reasoning_config", {})
-    thinking_effort = reasoning_config.get("effort", "high") if reasoning_config.get("enabled") else "medium"
+    if reasoning_config.get("enabled"):
+        thinking_type = reasoning_config.get("effort", "high")
+    else:
+        thinking_type = "medium"
+    if isinstance(thinking_type, dict):
+        thinking_type = thinking_type.get("type", "high" if reasoning_config.get("enabled") else "medium")
+    thinking_effort = thinking_type
     max_tokens = model_config.get("max_tokens") or 16384
     temperature = 1.0
     
@@ -260,13 +285,14 @@ def process_hermes_json(json_path, system_prompt):
             call_record = {
                 "session_id": session_id,
                 "request_id": request_id,
-                "timestamp": msg.get("timestamp"),
+                "timestamp": normalize_timestamp(msg.get("timestamp")),
+                "thinking_effort": thinking_effort,
                 "request": {
                     "model": model_name,
                     "max_tokens": max_tokens,
                     "temperature": temperature,
                     "thinking": {
-                        "type": thinking_effort,
+                        "type": thinking_type,
                         "budget_tokens": 10000,
                     },
                     "system": system_blocks,

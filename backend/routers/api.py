@@ -27,6 +27,7 @@ from backend.services.pipeline import (
     PipelineError,
     build_sample_metadata,
     persist_passed_sample,
+    run_hermes_pipeline,
     run_openclaw_pipeline,
 )
 from backend.services.assistant_turns import turns_from_qc_stats
@@ -196,7 +197,7 @@ def _submission_to_response(submission: Submission) -> SubmissionResponse:
         task_id=submission.task_id,
         status=submission.status,
         source_type=submission.source_type,
-        model_version=submission.model_version,
+        model_version=submission.model_version or None,
         session_id=submission.session_id,
         detected_model=submission.detected_model,
         difficulty=submission.difficulty,
@@ -223,8 +224,6 @@ def _process_submission(submission_id: int) -> None:
         work_dir = settings.data_dir / "processing" / f"task_{task.id}" / f"sub_{submission.id}"
         uploaded_file = Path(submission.file_path)
         try:
-            if submission.source_type == "hermes":
-                raise PipelineError("Hermes 流水线第一期暂未开放，请使用 OpenClaw")
 
             def on_progress(step: str, message: str, status: str = "running") -> None:
                 submission_ref = db.get(Submission, submission_id)
@@ -235,7 +234,11 @@ def _process_submission(submission_id: int) -> None:
             def validate_session_id(session_id: str) -> None:
                 ensure_session_available(db, session_id)
 
-            result = run_openclaw_pipeline(
+            pipeline_runner = (
+                run_hermes_pipeline if submission.source_type == "hermes" else run_openclaw_pipeline
+            )
+
+            result = pipeline_runner(
                 settings,
                 uploaded_file,
                 work_dir,
@@ -244,6 +247,8 @@ def _process_submission(submission_id: int) -> None:
                 validate_session_id=validate_session_id,
             )
             ensure_session_available(db, result["session_id"])
+            submission.model_version = result["model_version"]
+            submission.detected_model = result["detected_model"]
             metadata = build_sample_metadata(
                 task_id=task.id,
                 session_id=result["session_id"],
@@ -252,7 +257,7 @@ def _process_submission(submission_id: int) -> None:
                 topic=task.topic,
                 constraint_text=task.constraint_text,
                 source_type=submission.source_type,
-                model_version=submission.model_version,
+                model_version=result["model_version"],
                 detected_model=result["detected_model"],
                 difficulty=result["difficulty"],
             )
@@ -269,7 +274,6 @@ def _process_submission(submission_id: int) -> None:
 
             submission.status = "passed"
             submission.session_id = result["session_id"]
-            submission.detected_model = result["detected_model"]
             submission.difficulty = result["difficulty"]
             submission.justification = result["justification"]
             submission.qc_stats_json = json.dumps(result["qc_stats"], ensure_ascii=False)
@@ -288,7 +292,7 @@ def _process_submission(submission_id: int) -> None:
                 submission_id=submission.id,
                 user_id=submission.user_id,
                 source_type=submission.source_type,
-                model_version=submission.model_version,
+                model_version=result["model_version"],
                 detected_model=result["detected_model"],
                 scene=task.scene,
                 session_id=result["session_id"],
@@ -303,7 +307,7 @@ def _process_submission(submission_id: int) -> None:
 
             task.status = "passed"
             task.source_type = submission.source_type
-            task.model_version = submission.model_version
+            task.model_version = result["model_version"]
             task.passed_at = datetime.now(timezone.utc)
             db.commit()
         except PipelineError as exc:
@@ -332,7 +336,6 @@ async def upload_task_file(
     task_id: int,
     background_tasks: BackgroundTasks,
     source_type: str = Form(...),
-    model_version: str = Form(...),
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
@@ -344,14 +347,14 @@ async def upload_task_file(
         raise HTTPException(status_code=400, detail="只能为自己已领取的任务上传文件")
     if source_type not in {"openclaw", "hermes"}:
         raise HTTPException(status_code=400, detail="来源类型无效")
-    if model_version not in {"opus-4.6", "opus-4.8"}:
-        raise HTTPException(status_code=400, detail="模型版本无效")
-    if source_type == "hermes":
-        raise HTTPException(status_code=400, detail="Hermes 上传入口第一期暂未开放")
-
-    filename = file.filename or "upload.jsonl"
-    if not filename.endswith(".jsonl"):
-        raise HTTPException(status_code=400, detail="OpenClaw 文件必须是 .jsonl 格式")
+    if source_type == "openclaw":
+        filename = file.filename or "upload.jsonl"
+        if not filename.endswith(".jsonl"):
+            raise HTTPException(status_code=400, detail="OpenClaw 文件必须是 .jsonl 格式")
+    else:
+        filename = file.filename or "upload.json"
+        if not filename.endswith(".json"):
+            raise HTTPException(status_code=400, detail="Hermes 文件必须是 .json 格式")
 
     upload_dir = settings.uploads_dir / str(user.id) / str(task_id)
     upload_dir.mkdir(parents=True, exist_ok=True)
@@ -371,14 +374,13 @@ async def upload_task_file(
         task_id=task.id,
         user_id=user.id,
         source_type=source_type,
-        model_version=model_version,
+        model_version="",
         original_filename=filename,
         file_path=str(dest),
         status="processing",
     )
     db.add(submission)
     task.source_type = source_type
-    task.model_version = model_version
     db.commit()
     db.refresh(submission)
     init_processing_log(db, submission)
