@@ -41,6 +41,7 @@ export function AdminPage() {
   const [message, setMessage] = useState("");
   const [importFile, setImportFile] = useState<File | null>(null);
   const [importing, setImporting] = useState(false);
+  const [downloadingZip, setDownloadingZip] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const [userStats, setUserStats] = useState<UserStat[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -183,21 +184,38 @@ export function AdminPage() {
   };
 
   const onDownloadZip = async () => {
-    const token = getToken();
-    const res = await fetch("/api/delivery/zip", {
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-    });
-    if (!res.ok) {
-      setMessage("下载失败，请确认已有通过样本");
-      return;
+    if (downloadingZip) return;
+    setDownloadingZip(true);
+    setMessage("");
+    try {
+      const token = getToken();
+      const res = await fetch("/api/delivery/zip", {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (!res.ok) {
+        let detail = "下载失败，请确认已有通过样本";
+        try {
+          const data = (await res.json()) as { detail?: string };
+          if (data.detail) detail = data.detail;
+        } catch {
+          // ignore non-json error body
+        }
+        setMessage(detail);
+        return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `delivery_${Date.now()}.zip`;
+      a.click();
+      URL.revokeObjectURL(url);
+      setMessage("交付 ZIP 已开始下载");
+    } catch {
+      setMessage("下载失败，请稍后重试");
+    } finally {
+      setDownloadingZip(false);
     }
-    const blob = await res.blob();
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `delivery_${Date.now()}.zip`;
-    a.click();
-    URL.revokeObjectURL(url);
   };
 
   return (
@@ -457,8 +475,12 @@ export function AdminPage() {
         <p className="text-sm text-slate-400">
           打包 OpenClaw 与 Hermes 各自的「待质检数据」和「质检结果」目录（有通过样本的来源会包含；含 report 与 sample_metadata.json）
         </p>
-        <button className="btn btn-primary" onClick={onDownloadZip}>
-          下载 ZIP
+        <button
+          className="btn btn-primary"
+          onClick={onDownloadZip}
+          disabled={downloadingZip}
+        >
+          {downloadingZip ? "打包中..." : "下载 ZIP"}
         </button>
       </div>
     </div>
