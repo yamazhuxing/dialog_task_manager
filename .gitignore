@@ -38,3 +38,6 @@ sample/hermes-待质检数据/
 sample/hermes-待质检数据-质检结果/
 data/processing/
 data/test_*/
+data/delivery_latest.zip
+data/delivery_latest.meta.json
+data/delivery_*.zip

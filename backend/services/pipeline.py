@@ -9,6 +9,7 @@ from collections.abc import Callable
 
 from backend.config import Settings
 
+from backend.services.questions import invalidate_delivery_zip_cache
 from backend.services.quality_report import refresh_delivery_report, remove_convert_metadata
 from backend.services.sample_paths import SourceSamplePaths, delivery_report_path
 from backend.models import Task
@@ -347,6 +348,7 @@ def persist_passed_sample(
     shutil.copytree(work_dir, backup_root)
 
     refresh_delivery_report(paths.convert_dir, paths.qc_dir)
+    invalidate_delivery_zip_cache(settings)
 
     return {
         "raw_file": raw_dest,

@@ -42,6 +42,10 @@ export function AdminPage() {
   const [importFile, setImportFile] = useState<File | null>(null);
   const [importing, setImporting] = useState(false);
   const [downloadingZip, setDownloadingZip] = useState(false);
+  const [downloadProgress, setDownloadProgress] = useState<{
+    phase: "packaging" | "downloading";
+    percent: number | null;
+  } | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const [userStats, setUserStats] = useState<UserStat[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -187,6 +191,7 @@ export function AdminPage() {
     if (downloadingZip) return;
     setDownloadingZip(true);
     setMessage("");
+    setDownloadProgress({ phase: "packaging", percent: null });
     try {
       const token = getToken();
       const res = await fetch("/api/delivery/zip", {
@@ -203,18 +208,52 @@ export function AdminPage() {
         setMessage(detail);
         return;
       }
-      const blob = await res.blob();
+
+      const totalBytes = Number(res.headers.get("Content-Length") || 0);
+      setDownloadProgress({ phase: "downloading", percent: totalBytes > 0 ? 0 : null });
+
+      let blob: Blob;
+      if (!res.body) {
+        blob = await res.blob();
+      } else {
+        const reader = res.body.getReader();
+        const chunks: Uint8Array[] = [];
+        let received = 0;
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          chunks.push(value);
+          received += value.length;
+          if (totalBytes > 0) {
+            setDownloadProgress({
+              phase: "downloading",
+              percent: Math.min(99, Math.round((received / totalBytes) * 100)),
+            });
+          }
+        }
+        blob = new Blob(chunks as BlobPart[], { type: res.headers.get("Content-Type") || "application/zip" });
+      }
+
+      if (totalBytes > 0) {
+        setDownloadProgress({ phase: "downloading", percent: 100 });
+      }
+
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
       a.download = `delivery_${Date.now()}.zip`;
       a.click();
       URL.revokeObjectURL(url);
-      setMessage("交付 ZIP 已开始下载");
+      setMessage(
+        totalBytes > 0
+          ? `交付 ZIP 已开始下载（${formatFileSize(totalBytes)}）`
+          : "交付 ZIP 已开始下载",
+      );
     } catch {
       setMessage("下载失败，请稍后重试");
     } finally {
       setDownloadingZip(false);
+      setDownloadProgress(null);
     }
   };
 
@@ -473,14 +512,38 @@ export function AdminPage() {
       <div className="card space-y-4">
         <h2 className="font-medium">交付物下载</h2>
         <p className="text-sm text-slate-400">
-          打包 OpenClaw 与 Hermes 各自的「待质检数据」和「质检结果」目录（有通过样本的来源会包含；含 report 与 sample_metadata.json）
+          打包 OpenClaw 与 Hermes 各自的「待质检数据」和「质检结果」目录（有通过样本的来源会包含；含 report 与
+          sample_metadata.json）。首次下载或新增样本后会重新打包，之后重复下载会使用缓存加速。
         </p>
+        {downloadProgress && (
+          <div className="space-y-2 rounded-xl border border-white/10 bg-black/20 p-4">
+            <div className="text-sm text-slate-300">
+              {downloadProgress.phase === "packaging"
+                ? "正在服务器打包，样本较多时请耐心等待..."
+                : downloadProgress.percent != null
+                  ? `正在下载 ${downloadProgress.percent}%`
+                  : "正在下载..."}
+            </div>
+            {downloadProgress.percent != null && (
+              <div className="h-2 overflow-hidden rounded-full bg-white/10">
+                <div
+                  className="h-full rounded-full bg-cyan-400 transition-all duration-200"
+                  style={{ width: `${downloadProgress.percent}%` }}
+                />
+              </div>
+            )}
+          </div>
+        )}
         <button
           className="btn btn-primary"
           onClick={onDownloadZip}
           disabled={downloadingZip}
         >
-          {downloadingZip ? "打包中..." : "下载 ZIP"}
+          {downloadingZip
+            ? downloadProgress?.phase === "downloading" && downloadProgress.percent != null
+              ? `下载中 ${downloadProgress.percent}%`
+              : "打包中..."
+            : "下载 ZIP"}
         </button>
       </div>
     </div>

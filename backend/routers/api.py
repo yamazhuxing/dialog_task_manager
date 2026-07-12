@@ -478,4 +478,5 @@ def download_delivery_zip(_: User = Depends(require_admin)):
         path=zip_path,
         filename=zip_path.name,
         media_type="application/zip",
+        headers={"Cache-Control": "no-store"},
     )
