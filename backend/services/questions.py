@@ -8,12 +8,15 @@ from sqlalchemy.orm import Session
 
 from backend.config import Settings
 from backend.constants import MAX_TASK_TURNS, MIN_TASK_TURNS, SCENE_LABELS
-from backend.models import QuestionImport, Task, User
+from backend.models import QuestionImport, Sample, Task, User
 from backend.services.quality_report import remove_convert_metadata
 from backend.services.sample_paths import iter_delivery_sources
 
 DELIVERY_ZIP_NAME = "delivery_latest.zip"
 DELIVERY_ZIP_META_NAME = "delivery_latest.meta.json"
+RAW_DELIVERY_ZIP_NAME = "delivery_raw_latest.zip"
+RAW_DELIVERY_ZIP_META_NAME = "delivery_raw_latest.meta.json"
+RAW_MANIFEST_NAME = "raw_manifest.json"
 
 
 def import_questions_from_data(
@@ -184,7 +187,113 @@ def create_delivery_zip(settings: Settings, *, force: bool = False) -> Path:
     return cache_zip
 
 
+def _resolve_sample_raw_path(settings: Settings, sample: Sample) -> Path | None:
+    """定位已通过样本的原始上传文件。"""
+    candidates: list[Path] = []
+    stored = Path(sample.raw_file_path)
+    candidates.append(stored)
+    if not stored.is_absolute():
+        candidates.append(settings.project_root / stored)
+    candidates.append(settings.samples_dir / sample.source_type / stored.name)
+    for path in candidates:
+        if path.is_file():
+            return path
+    return None
+
+
+def _raw_delivery_fingerprint(db: Session, settings: Settings) -> tuple[int, float, list[dict]]:
+    """统计原始文件数、最新修改时间，并收集待打包条目。"""
+    rows = (
+        db.query(Sample, User.username)
+        .join(User, Sample.user_id == User.id)
+        .order_by(Sample.id.asc())
+        .all()
+    )
+    if not rows:
+        raise FileNotFoundError("暂无已通过样本，请先完成至少一条通过样本")
+
+    entries: list[dict] = []
+    file_count = 0
+    max_mtime = 0.0
+    for sample, username in rows:
+        raw_path = _resolve_sample_raw_path(settings, sample)
+        if raw_path is None:
+            continue
+        file_count += 1
+        max_mtime = max(max_mtime, raw_path.stat().st_mtime)
+        entries.append(
+            {
+                "arcname": f"{sample.source_type}/{raw_path.name}",
+                "path": raw_path,
+                "manifest": {
+                    "task_id": sample.task_id,
+                    "session_id": sample.session_id,
+                    "user_id": sample.user_id,
+                    "username": username,
+                    "source_type": sample.source_type,
+                    "model_version": sample.model_version,
+                    "scene": sample.scene,
+                    "difficulty": sample.difficulty,
+                    "arcname": f"{sample.source_type}/{raw_path.name}",
+                },
+            }
+        )
+
+    if not entries:
+        raise FileNotFoundError("暂无可下载的原始上传文件，请检查 samples 表中的 raw_file_path")
+
+    return file_count, max_mtime, entries
+
+
+def _write_raw_delivery_zip(entries: list[dict], zip_path: Path) -> None:
+    zip_path.parent.mkdir(parents=True, exist_ok=True)
+    manifest = [item["manifest"] for item in entries]
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED, compresslevel=1) as zf:
+        zf.writestr(
+            RAW_MANIFEST_NAME,
+            json.dumps(manifest, ensure_ascii=False, indent=2),
+        )
+        for item in entries:
+            zf.write(item["path"], item["arcname"])
+
+
+def create_raw_delivery_zip(db: Session, settings: Settings, *, force: bool = False) -> Path:
+    file_count, max_mtime, entries = _raw_delivery_fingerprint(db, settings)
+    cache_zip = settings.data_dir / RAW_DELIVERY_ZIP_NAME
+    cache_meta = settings.data_dir / RAW_DELIVERY_ZIP_META_NAME
+
+    cached = _read_delivery_cache_meta(cache_meta)
+    if (
+        not force
+        and cache_zip.exists()
+        and cached
+        and cached.get("file_count") == file_count
+        and cached.get("max_mtime") == max_mtime
+    ):
+        return cache_zip
+
+    _write_raw_delivery_zip(entries, cache_zip)
+    cache_meta.write_text(
+        json.dumps(
+            {
+                "file_count": file_count,
+                "max_mtime": max_mtime,
+                "built_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    return cache_zip
+
+
 def invalidate_delivery_zip_cache(settings: Settings) -> None:
     """有新样本入库后丢弃缓存，下次下载时重新打包。"""
-    for name in (DELIVERY_ZIP_NAME, DELIVERY_ZIP_META_NAME):
+    for name in (
+        DELIVERY_ZIP_NAME,
+        DELIVERY_ZIP_META_NAME,
+        RAW_DELIVERY_ZIP_NAME,
+        RAW_DELIVERY_ZIP_META_NAME,
+    ):
         (settings.data_dir / name).unlink(missing_ok=True)

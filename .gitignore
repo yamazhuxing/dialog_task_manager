@@ -40,4 +40,6 @@ data/processing/
 data/test_*/
 data/delivery_latest.zip
 data/delivery_latest.meta.json
+data/delivery_raw_latest.zip
+data/delivery_raw_latest.meta.json
 data/delivery_*.zip

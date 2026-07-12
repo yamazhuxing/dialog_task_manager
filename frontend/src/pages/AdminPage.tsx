@@ -187,14 +187,14 @@ export function AdminPage() {
     }
   };
 
-  const onDownloadZip = async () => {
+  const downloadDeliveryZip = async (apiPath: string, filenamePrefix: string, successLabel: string) => {
     if (downloadingZip) return;
     setDownloadingZip(true);
     setMessage("");
     setDownloadProgress({ phase: "packaging", percent: null });
     try {
       const token = getToken();
-      const res = await fetch("/api/delivery/zip", {
+      const res = await fetch(apiPath, {
         headers: token ? { Authorization: `Bearer ${token}` } : {},
       });
       if (!res.ok) {
@@ -241,13 +241,11 @@ export function AdminPage() {
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `delivery_${Date.now()}.zip`;
+      a.download = `${filenamePrefix}_${Date.now()}.zip`;
       a.click();
       URL.revokeObjectURL(url);
       setMessage(
-        totalBytes > 0
-          ? `交付 ZIP 已开始下载（${formatFileSize(totalBytes)}）`
-          : "交付 ZIP 已开始下载",
+        totalBytes > 0 ? `${successLabel}已开始下载（${formatFileSize(totalBytes)}）` : `${successLabel}已开始下载`,
       );
     } catch {
       setMessage("下载失败，请稍后重试");
@@ -256,6 +254,12 @@ export function AdminPage() {
       setDownloadProgress(null);
     }
   };
+
+  const onDownloadZip = () =>
+    downloadDeliveryZip("/api/delivery/zip", "delivery", "交付 ZIP ");
+
+  const onDownloadRawZip = () =>
+    downloadDeliveryZip("/api/delivery/raw-zip", "delivery_raw", "原始数据 ZIP ");
 
   return (
     <div className="space-y-6">
@@ -512,8 +516,12 @@ export function AdminPage() {
       <div className="card space-y-4">
         <h2 className="font-medium">交付物下载</h2>
         <p className="text-sm text-slate-400">
-          打包 OpenClaw 与 Hermes 各自的「待质检数据」和「质检结果」目录（有通过样本的来源会包含；含 report 与
+          转换后交付：打包 OpenClaw 与 Hermes 各自的「待质检数据」和「质检结果」目录（有通过样本的来源会包含；含 report 与
           sample_metadata.json）。首次下载或新增样本后会重新打包，之后重复下载会使用缓存加速。
+        </p>
+        <p className="text-sm text-slate-400">
+          原始上传：打包各已通过样本的用户上传文件（OpenClaw 为 .jsonl，Hermes 为 .json），按来源分子目录，并附带
+          raw_manifest.json（任务、用户、session 对照表）。
         </p>
         {downloadProgress && (
           <div className="space-y-2 rounded-xl border border-white/10 bg-black/20 p-4">
@@ -534,17 +542,30 @@ export function AdminPage() {
             )}
           </div>
         )}
-        <button
-          className="btn btn-primary"
-          onClick={onDownloadZip}
-          disabled={downloadingZip}
-        >
-          {downloadingZip
-            ? downloadProgress?.phase === "downloading" && downloadProgress.percent != null
-              ? `下载中 ${downloadProgress.percent}%`
-              : "打包中..."
-            : "下载 ZIP"}
-        </button>
+        <div className="flex flex-wrap gap-2">
+          <button
+            className="btn btn-primary"
+            onClick={onDownloadZip}
+            disabled={downloadingZip}
+          >
+            {downloadingZip
+              ? downloadProgress?.phase === "downloading" && downloadProgress.percent != null
+                ? `下载中 ${downloadProgress.percent}%`
+                : "打包中..."
+              : "下载转换后 ZIP"}
+          </button>
+          <button
+            className="btn btn-secondary"
+            onClick={onDownloadRawZip}
+            disabled={downloadingZip}
+          >
+            {downloadingZip
+              ? downloadProgress?.phase === "downloading" && downloadProgress.percent != null
+                ? `下载中 ${downloadProgress.percent}%`
+                : "打包中..."
+              : "下载原始上传 ZIP"}
+          </button>
+        </div>
       </div>
     </div>
   );

@@ -45,6 +45,7 @@ from backend.services.submission_progress import (
 )
 from backend.services.questions import (
     create_delivery_zip,
+    create_raw_delivery_zip,
     create_single_task,
     import_questions_from_data,
     load_questions_file,
@@ -475,6 +476,22 @@ def download_delivery_zip(_: User = Depends(require_admin)):
 
     try:
         zip_path = create_delivery_zip(settings)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return FileResponse(
+        path=zip_path,
+        filename=zip_path.name,
+        media_type="application/zip",
+        headers={"Cache-Control": "no-store"},
+    )
+
+
+@router.get("/delivery/raw-zip")
+def download_raw_delivery_zip(db: Session = Depends(get_db), _: User = Depends(require_admin)):
+    from fastapi.responses import FileResponse
+
+    try:
+        zip_path = create_raw_delivery_zip(db, settings)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return FileResponse(
