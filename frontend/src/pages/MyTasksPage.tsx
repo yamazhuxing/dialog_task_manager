@@ -2,14 +2,20 @@ import React, { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { TaskItem, fetchTasks } from "../api/client";
 
+function parseApiDateTime(value: string) {
+  const normalized = /[zZ]|[+-]\d{2}:?\d{2}$/.test(value) ? value : `${value}Z`;
+  return new Date(normalized);
+}
+
 function formatDateTime(value: string | null) {
   if (!value) return null;
-  return new Date(value).toLocaleString("zh-CN", {
+  return parseApiDateTime(value).toLocaleString("zh-CN", {
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
     hour: "2-digit",
     minute: "2-digit",
+    timeZone: "Asia/Shanghai",
   });
 }
 
