@@ -73,6 +73,8 @@ export function AdminPage() {
   const [deletingTask, setDeletingTask] = useState(false);
   const [difficultyRepairs, setDifficultyRepairs] = useState<InvalidDifficultySample[]>([]);
   const [retryingDifficultyTaskId, setRetryingDifficultyTaskId] = useState<number | null>(null);
+  const [deliveryGroup, setDeliveryGroup] = useState("5组");
+  const [deliverySubmitter, setDeliverySubmitter] = useState("野马逐星&Betsy");
 
   useEffect(() => {
     loadUserStats(setUserStats);
@@ -292,6 +294,14 @@ export function AdminPage() {
 
   const onDownloadRawZip = () =>
     downloadDeliveryZip("/api/delivery/raw-zip", "delivery_raw", "原始数据 ZIP ");
+
+  const onDownloadV2Zip = () => {
+    const params = new URLSearchParams({
+      group: deliveryGroup.trim() || "5组",
+      submitter: deliverySubmitter.trim() || "野马逐星&Betsy",
+    });
+    downloadDeliveryZip(`/api/delivery/v2-zip?${params.toString()}`, "delivery_v2", "新版交付 ZIP ");
+  };
 
   return (
     <div className="space-y-6">
@@ -614,6 +624,10 @@ export function AdminPage() {
           原始上传：打包各已通过样本的用户上传文件（OpenClaw 为 .jsonl，Hermes 为 .json），按来源分子目录，并附带
           raw_manifest.json（任务、用户、session 对照表）。
         </p>
+        <p className="text-sm text-slate-400">
+          新版交付：质检提交记录.xlsx + hermes/ + openclaw/，其中来源目录仅包含 pass 通过样本（含 call 文件、难度与
+          metadata）；sessionId 使用任务ID_sessionUUID，与目录名一致。
+        </p>
         {downloadProgress && (
           <div className="space-y-2 rounded-xl border border-white/10 bg-black/20 p-4">
             <div className="text-sm text-slate-300">
@@ -633,6 +647,28 @@ export function AdminPage() {
             )}
           </div>
         )}
+        <div className="grid gap-3 md:grid-cols-2">
+          <label className="block text-sm">
+            <span className="mb-1 block text-slate-400">新版交付 · 分组</span>
+            <input
+              className="input"
+              value={deliveryGroup}
+              onChange={(e) => setDeliveryGroup(e.target.value)}
+              placeholder="如：5组"
+              disabled={downloadingZip}
+            />
+          </label>
+          <label className="block text-sm">
+            <span className="mb-1 block text-slate-400">新版交付 · 提交者</span>
+            <input
+              className="input"
+              value={deliverySubmitter}
+              onChange={(e) => setDeliverySubmitter(e.target.value)}
+              placeholder="如：野马逐星&Betsy"
+              disabled={downloadingZip}
+            />
+          </label>
+        </div>
         <div className="flex flex-wrap gap-2">
           <button
             className="btn btn-primary"
@@ -655,6 +691,17 @@ export function AdminPage() {
                 ? `下载中 ${downloadProgress.percent}%`
                 : "打包中..."
               : "下载原始上传 ZIP"}
+          </button>
+          <button
+            className="btn btn-secondary"
+            onClick={onDownloadV2Zip}
+            disabled={downloadingZip}
+          >
+            {downloadingZip
+              ? downloadProgress?.phase === "downloading" && downloadProgress.percent != null
+                ? `下载中 ${downloadProgress.percent}%`
+                : "打包中..."
+              : "下载新版交付 ZIP"}
           </button>
         </div>
       </div>

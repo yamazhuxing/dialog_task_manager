@@ -1,8 +1,10 @@
+import io
 import json
 import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 
+from openpyxl import Workbook
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -10,13 +12,17 @@ from backend.config import Settings
 from backend.constants import MAX_TASK_TURNS, MIN_TASK_TURNS, SCENE_LABELS
 from backend.models import QuestionImport, Sample, Task, User
 from backend.services.quality_report import remove_convert_metadata
-from backend.services.sample_paths import iter_delivery_sources
+from backend.services.sample_paths import SourceSamplePaths, iter_delivery_sources
+from backend.services.submission_validation import sample_storage_dir_name
 
 DELIVERY_ZIP_NAME = "delivery_latest.zip"
 DELIVERY_ZIP_META_NAME = "delivery_latest.meta.json"
 RAW_DELIVERY_ZIP_NAME = "delivery_raw_latest.zip"
 RAW_DELIVERY_ZIP_META_NAME = "delivery_raw_latest.meta.json"
+V2_DELIVERY_ZIP_NAME = "delivery_v2_latest.zip"
+V2_DELIVERY_ZIP_META_NAME = "delivery_v2_latest.meta.json"
 RAW_MANIFEST_NAME = "raw_manifest.json"
+QC_RECORD_XLSX_NAME = "质检提交记录.xlsx"
 
 
 def import_questions_from_data(
@@ -288,6 +294,180 @@ def create_raw_delivery_zip(db: Session, settings: Settings, *, force: bool = Fa
     return cache_zip
 
 
+def _resolve_v2_pass_dir(settings: Settings, sample: Sample) -> Path | None:
+    """定位新版交付 ZIP 用的 pass session 目录。"""
+    storage_name = sample_storage_dir_name(sample.task_id, sample.session_id)
+    paths = SourceSamplePaths.from_root(settings.samples_dir, sample.source_type)
+    candidates = [paths.pass_dir / storage_name, paths.pass_dir / sample.session_id]
+
+    backup_root = Path(sample.backup_dir) if sample.backup_dir else None
+    if backup_root and backup_root.is_dir():
+        backup_paths = SourceSamplePaths.from_root(backup_root, sample.source_type)
+        candidates.extend(
+            [
+                backup_paths.pass_dir / storage_name,
+                backup_paths.pass_dir / sample.session_id,
+            ]
+        )
+
+    for path in candidates:
+        if path.is_dir() and any(path.glob("*.json")):
+            return path
+    return None
+
+
+def _build_qc_record_workbook(rows: list[dict], *, group: str, submitter: str) -> bytes:
+    """生成质检提交记录.xlsx（分组 / 提交者 / sessionId / 对话场景）。"""
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Sheet1"
+    headers = ["分组", "提交者", "sessionId", "对话场景"]
+    for col, header in enumerate(headers, start=1):
+        ws.cell(1, col, header)
+    for idx, row in enumerate(rows, start=2):
+        ws.cell(idx, 1, group)
+        ws.cell(idx, 2, submitter)
+        ws.cell(idx, 3, row["session_storage_name"])
+        ws.cell(idx, 4, row["scene_label"])
+    buffer = io.BytesIO()
+    wb.save(buffer)
+    return buffer.getvalue()
+
+
+def _v2_delivery_fingerprint(
+    db: Session,
+    settings: Settings,
+    *,
+    group: str,
+    submitter: str,
+) -> tuple[int, float, list[dict], str, str]:
+    """统计新版交付条目与最新 mtime。"""
+    rows = (
+        db.query(Sample, Task)
+        .join(Task, Sample.task_id == Task.id)
+        .order_by(Sample.id.asc())
+        .all()
+    )
+    if not rows:
+        raise FileNotFoundError("暂无已通过样本，请先完成至少一条通过样本")
+
+    entries: list[dict] = []
+    file_count = 0
+    max_mtime = 0.0
+    for sample, task in rows:
+        pass_dir = _resolve_v2_pass_dir(settings, sample)
+        if pass_dir is None:
+            continue
+        storage_name = sample_storage_dir_name(sample.task_id, sample.session_id)
+        session_files: list[Path] = []
+        for file_path in pass_dir.rglob("*"):
+            if not file_path.is_file():
+                continue
+            # 交付包内不要带 sample_metadata.json 外的临时/隐藏文件；其余正式产物全收
+            session_files.append(file_path)
+            file_count += 1
+            max_mtime = max(max_mtime, file_path.stat().st_mtime)
+        if not session_files:
+            continue
+        entries.append(
+            {
+                "source_type": sample.source_type,
+                "session_storage_name": storage_name,
+                "scene_label": task.scene_label or task.scene,
+                "pass_dir": pass_dir,
+                "files": session_files,
+            }
+        )
+
+    if not entries:
+        raise FileNotFoundError("暂无可打包的 pass 样本目录，请检查 samples 目录")
+
+    return file_count, max_mtime, entries, group.strip(), submitter.strip()
+
+
+def _write_v2_delivery_zip(
+    entries: list[dict],
+    *,
+    group: str,
+    submitter: str,
+    zip_path: Path,
+) -> None:
+    zip_path.parent.mkdir(parents=True, exist_ok=True)
+    xlsx_bytes = _build_qc_record_workbook(entries, group=group, submitter=submitter)
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED, compresslevel=1) as zf:
+        zf.writestr(QC_RECORD_XLSX_NAME, xlsx_bytes)
+        for item in entries:
+            for file_path in item["files"]:
+                relative = file_path.relative_to(item["pass_dir"]).as_posix()
+                arcname = f"{item['source_type']}/{item['session_storage_name']}/{relative}"
+                zf.write(file_path, arcname)
+
+
+def create_v2_delivery_zip(
+    db: Session,
+    settings: Settings,
+    *,
+    group: str,
+    submitter: str,
+    force: bool = False,
+) -> Path:
+    """
+    新版交付 ZIP：
+      质检提交记录.xlsx
+      hermes/{taskId_sessionId}/...（仅 pass）
+      openclaw/{taskId_sessionId}/...（仅 pass）
+    """
+    if not group.strip():
+        raise ValueError("分组不能为空")
+    if not submitter.strip():
+        raise ValueError("提交者不能为空")
+
+    file_count, max_mtime, entries, group_value, submitter_value = _v2_delivery_fingerprint(
+        db,
+        settings,
+        group=group,
+        submitter=submitter,
+    )
+    cache_zip = settings.data_dir / V2_DELIVERY_ZIP_NAME
+    cache_meta = settings.data_dir / V2_DELIVERY_ZIP_META_NAME
+
+    cached = _read_delivery_cache_meta(cache_meta)
+    if (
+        not force
+        and cache_zip.exists()
+        and cached
+        and cached.get("file_count") == file_count
+        and cached.get("max_mtime") == max_mtime
+        and cached.get("group") == group_value
+        and cached.get("submitter") == submitter_value
+        and cached.get("entry_count") == len(entries)
+    ):
+        return cache_zip
+
+    _write_v2_delivery_zip(
+        entries,
+        group=group_value,
+        submitter=submitter_value,
+        zip_path=cache_zip,
+    )
+    cache_meta.write_text(
+        json.dumps(
+            {
+                "file_count": file_count,
+                "max_mtime": max_mtime,
+                "entry_count": len(entries),
+                "group": group_value,
+                "submitter": submitter_value,
+                "built_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    return cache_zip
+
+
 def invalidate_delivery_zip_cache(settings: Settings) -> None:
     """有新样本入库后丢弃缓存，下次下载时重新打包。"""
     for name in (
@@ -295,5 +475,7 @@ def invalidate_delivery_zip_cache(settings: Settings) -> None:
         DELIVERY_ZIP_META_NAME,
         RAW_DELIVERY_ZIP_NAME,
         RAW_DELIVERY_ZIP_META_NAME,
+        V2_DELIVERY_ZIP_NAME,
+        V2_DELIVERY_ZIP_META_NAME,
     ):
         (settings.data_dir / name).unlink(missing_ok=True)

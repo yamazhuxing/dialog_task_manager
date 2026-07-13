@@ -50,6 +50,7 @@ from backend.services.questions import (
     create_delivery_zip,
     create_raw_delivery_zip,
     create_single_task,
+    create_v2_delivery_zip,
     import_questions_from_data,
     load_questions_file,
 )
@@ -498,6 +499,30 @@ def download_raw_delivery_zip(db: Session = Depends(get_db), _: User = Depends(r
 
     try:
         zip_path = create_raw_delivery_zip(db, settings)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return FileResponse(
+        path=zip_path,
+        filename=zip_path.name,
+        media_type="application/zip",
+        headers={"Cache-Control": "no-store"},
+    )
+
+
+@router.get("/delivery/v2-zip")
+def download_v2_delivery_zip(
+    group: str = "5组",
+    submitter: str = "野马逐星&Betsy",
+    db: Session = Depends(get_db),
+    _: User = Depends(require_admin),
+):
+    """新版交付 ZIP：质检提交记录.xlsx + hermes/openclaw 仅 pass 目录。"""
+    from fastapi.responses import FileResponse
+
+    try:
+        zip_path = create_v2_delivery_zip(db, settings, group=group, submitter=submitter)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return FileResponse(
