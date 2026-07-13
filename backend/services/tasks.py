@@ -13,6 +13,7 @@ from backend.services.assistant_turns import (
     build_turn_bucket_distribution,
     resolve_assistant_turns,
 )
+from backend.services.thinking_effort import VALID_THINKING_EFFORTS, resolve_thinking_effort
 
 
 def task_to_list_item(task: Task) -> TaskListItem:
@@ -93,10 +94,12 @@ def delete_task(db: Session, task: Task) -> None:
 
 
 # 甲方验收比例：来源 openclaw:hermes ≈ 6:4，模型 opus 4.8 ≥ 70%，场景 13 类各 ≥1 且 max/min < 5
+# thinking effort xhigh:max ≈ 1:1
 SOURCE_OPENCLAW_RATIO_MIN = 0.55
 SOURCE_OPENCLAW_RATIO_MAX = 0.65
 MODEL_OPUS48_RATIO_MIN = 0.70
 SCENE_RATIO_MAX = 5
+THINKING_EFFORT_RATIO_MIN = 0.95
 
 
 def get_dashboard_stats(db: Session) -> DashboardStats:
@@ -145,17 +148,49 @@ def get_dashboard_stats(db: Session) -> DashboardStats:
         .all()
     )
     turn_counts: list[int] = []
+    thinking_efforts: list[str] = []
     backfill_needed = False
     for sample, submission in sample_rows:
         turns = resolve_assistant_turns(sample, submission)
-        if turns is None:
-            continue
-        turn_counts.append(turns)
-        if sample.assistant_turns is None:
-            sample.assistant_turns = turns
-            backfill_needed = True
+        if turns is not None:
+            turn_counts.append(turns)
+            if sample.assistant_turns is None:
+                sample.assistant_turns = turns
+                backfill_needed = True
+
+        effort = resolve_thinking_effort(sample, submission)
+        if effort:
+            thinking_efforts.append(effort)
+            if sample.thinking_effort is None:
+                sample.thinking_effort = effort
+                backfill_needed = True
     if backfill_needed:
         db.commit()
+
+    thinking_distribution = dict(Counter(thinking_efforts))
+    xhigh_count = thinking_distribution.get("xhigh", 0)
+    max_count = thinking_distribution.get("max", 0)
+    legacy_high_count = thinking_distribution.get("high", 0)
+    total_thinking_effort = xhigh_count + max_count
+    if total_thinking_effort == 0:
+        thinking_ratio_ok = False
+        thinking_range_ratio = None
+    else:
+        smaller = min(xhigh_count, max_count)
+        larger = max(xhigh_count, max_count)
+        thinking_range_ratio = round(smaller / larger, 2) if larger else None
+        thinking_ratio_ok = (
+            legacy_high_count == 0
+            and thinking_range_ratio is not None
+            and thinking_range_ratio >= THINKING_EFFORT_RATIO_MIN
+        )
+    thinking_effort_sample_count = len(thinking_efforts)
+    thinking_effort_missing_count = passed_count - thinking_effort_sample_count
+    invalid_thinking_effort_count = sum(
+        count
+        for effort, count in thinking_distribution.items()
+        if effort not in VALID_THINKING_EFFORTS
+    )
 
     assistant_turns_distribution = dict(Counter(str(n) for n in turn_counts))
     assistant_turns_buckets = {
@@ -191,6 +226,12 @@ def get_dashboard_stats(db: Session) -> DashboardStats:
         assistant_turns_avg=assistant_turns_avg,
         assistant_turns_sample_count=assistant_turns_sample_count,
         assistant_turns_missing_count=assistant_turns_missing_count,
+        thinking_effort_distribution=thinking_distribution,
+        thinking_ratio_ok=thinking_ratio_ok,
+        thinking_range_ratio=thinking_range_ratio,
+        thinking_effort_sample_count=thinking_effort_sample_count,
+        thinking_effort_missing_count=thinking_effort_missing_count,
+        invalid_thinking_effort_count=invalid_thinking_effort_count,
     )
 
 

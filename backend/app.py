@@ -48,6 +48,8 @@ def _ensure_sample_columns() -> None:
     statements = []
     if "assistant_turns" not in existing:
         statements.append("ALTER TABLE samples ADD COLUMN assistant_turns INT NULL")
+    if "thinking_effort" not in existing:
+        statements.append("ALTER TABLE samples ADD COLUMN thinking_effort VARCHAR(16) NULL")
     indexes = {idx["name"] for idx in inspector.get_indexes("samples")}
     if "uq_samples_session_id" not in indexes:
         statements.append("ALTER TABLE samples ADD UNIQUE INDEX uq_samples_session_id (session_id)")

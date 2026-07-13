@@ -29,8 +29,8 @@ MODEL_NAME_MAP = {
 # Heartbeat / cron / no_reply 关键词（用于检测低质量对话）
 SPECIAL_KEYWORDS = ["HEARTBEAT_OK", "NO_REPLY", "heartbeat poll", "[OpenClaw heartbeat poll]"]
 
-# 合法的 thinking_effort
-VALID_EFFORTS = ["high", "xhigh", "max"]
+# 合法的 thinking_effort（甲方 2026-07 起不再接受 high）
+VALID_EFFORTS = ["xhigh", "max"]
 
 
 def load_session_calls(session_dir):
@@ -119,11 +119,15 @@ def validate_session(session_dir):
         if name not in VALID_MODELS:
             errors.append(f"模型 '{name}' 不在允许列表中（允许: {VALID_MODELS}）")
     
-    # 检查 thinking_effort 一致性
-    thinking_efforts = [c.get("thinking_effort") for c in calls]      
+    # 检查 thinking_effort 有效性（仅 xhigh / max）
+    thinking_efforts = [c.get("thinking_effort") for c in calls]
     for effort in thinking_efforts:
         if effort not in VALID_EFFORTS:
-            errors.append("thinking_effort 不属于 [high, xhigh, max]")
+            errors.append("thinking_effort 不属于 [xhigh, max]（不再接受 high）")
+    if thinking_efforts and len(set(thinking_efforts)) > 1:
+        errors.append(f"同一 session 中 thinking_effort 不一致: {set(thinking_efforts)}")
+    if thinking_efforts:
+        stats["thinking_effort"] = thinking_efforts[0]
 
     
     # --- Call 级检查 ---

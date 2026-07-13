@@ -33,6 +33,7 @@ from backend.services.pipeline import (
     run_openclaw_pipeline,
 )
 from backend.services.assistant_turns import turns_from_qc_stats
+from backend.services.thinking_effort import effort_from_qc_stats
 from backend.services.submission_validation import (
     SubmissionValidationError,
     ensure_session_available,
@@ -268,6 +269,7 @@ def _process_submission(submission_id: int) -> None:
                 model_version=result["model_version"],
                 detected_model=result["detected_model"],
                 difficulty=result["difficulty"],
+                thinking_effort=result.get("thinking_effort"),
             )
             append_processing_log(db, submission, step="persist", message="正在写入样本与备份...")
             paths = persist_passed_sample(
@@ -306,6 +308,7 @@ def _process_submission(submission_id: int) -> None:
                 session_id=result["session_id"],
                 difficulty=result["difficulty"],
                 assistant_turns=turns_from_qc_stats(result.get("qc_stats")),
+                thinking_effort=effort_from_qc_stats(result.get("qc_stats")) or result.get("thinking_effort"),
                 raw_file_path=str(paths["raw_file"]),
                 convert_dir=str(paths["convert_dir"]),
                 qc_dir=str(paths["qc_dir"]),

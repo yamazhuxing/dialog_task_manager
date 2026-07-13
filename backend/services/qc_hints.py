@@ -59,9 +59,14 @@ _RULES: list[tuple[re.Pattern[str], str, str]] = [
         "确保最后一轮 assistant 有非空 text 总结",
     ),
     (
+        re.compile(r"thinking_effort 不属于|thinking_effort 不一致", re.I),
+        "thinking effort 不符合新标准",
+        "仅使用 xhigh 或 max（不再接受 high），且同一对话全程保持一致",
+    ),
+    (
         re.compile(r"thinking block 为空|没有非空的 thinking", re.I),
         "缺少有效 thinking 块",
-        "使用 high/xhigh/max thinking，并确保模型输出带 signature 的 thinking",
+        "使用 xhigh/max thinking，并确保模型输出带 signature 的 thinking",
     ),
     (
         re.compile(r"模型.*不在允许列表|模型名称不唯一", re.I),

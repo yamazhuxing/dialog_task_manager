@@ -15,6 +15,7 @@ from backend.services.difficulty import (
     run_difficulty_rating,
     validate_difficulty_result,
 )
+from backend.services.thinking_effort import read_thinking_effort_from_session
 from backend.services.questions import invalidate_delivery_zip_cache
 from backend.services.quality_report import refresh_delivery_report, remove_convert_metadata
 from backend.services.sample_paths import SourceSamplePaths, delivery_report_path
@@ -196,6 +197,7 @@ def run_sample_pipeline(
         )
     progress("quality_check", "质量检测通过", "done")
 
+    thinking_effort = read_thinking_effort_from_session(session_dir)
     progress("difficulty", "正在评级任务难度...")
     try:
         run_difficulty_rating(settings, pass_dir)
@@ -216,6 +218,8 @@ def run_sample_pipeline(
         ) from exc
     progress("difficulty", f"难度评级完成: {difficulty}", "done")
     qc_stats = _read_report_stats(pass_session_dir)
+    if thinking_effort:
+        qc_stats["thinking_effort"] = thinking_effort
 
     return {
         "session_id": session_id,
@@ -223,6 +227,7 @@ def run_sample_pipeline(
         "model_version": model_version,
         "difficulty": difficulty,
         "justification": justification,
+        "thinking_effort": thinking_effort,
         "qc_stats": qc_stats,
         "convert_dir": convert_dir,
         "qc_root": paths.qc_dir,
@@ -291,6 +296,7 @@ def build_sample_metadata(
     model_version: str,
     detected_model: str | None,
     difficulty: str | None,
+    thinking_effort: str | None = None,
 ) -> dict:
     return {
         "task_id": task_id,
@@ -303,6 +309,7 @@ def build_sample_metadata(
         "model_version": model_version,
         "detected_model": detected_model,
         "difficulty": difficulty,
+        "thinking_effort": thinking_effort,
         "metadata_version": 1,
         "created_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
     }

@@ -77,6 +77,12 @@ export interface DashboardStats {
   assistant_turns_avg: number | null;
   assistant_turns_sample_count: number;
   assistant_turns_missing_count: number;
+  thinking_effort_distribution: Record<string, number>;
+  thinking_ratio_ok: boolean;
+  thinking_range_ratio: number | null;
+  thinking_effort_sample_count: number;
+  thinking_effort_missing_count: number;
+  invalid_thinking_effort_count: number;
 }
 
 export async function login(username: string, password: string) {

@@ -215,6 +215,22 @@ export function DashboardPage() {
           hint={`已覆盖 ${stats.scene_covered_count}/${stats.scene_total_count} 类；极差比 max÷min ${stats.scene_range_ratio != null ? `= ${stats.scene_range_ratio}（< 5 达标）` : "待计算（每类需 ≥1 条）"}`}
         />
         <DistributionCard title="难度分布" data={stats.difficulty_distribution} />
+        <DistributionCard
+          title="Thinking Effort (xhigh : max ≈ 1:1)"
+          data={stats.thinking_effort_distribution}
+          ok={stats.thinking_ratio_ok}
+          hint={
+            stats.thinking_effort_sample_count > 0
+              ? `xhigh ${stats.thinking_effort_distribution.xhigh ?? 0} 条 · max ${stats.thinking_effort_distribution.max ?? 0} 条` +
+                (stats.thinking_range_ratio != null
+                  ? `；min÷max = ${stats.thinking_range_ratio}（要求 ≥ 0.95，约 1:1）`
+                  : "；比例待计算") +
+                (stats.invalid_thinking_effort_count > 0
+                  ? `；另有 ${stats.invalid_thinking_effort_count} 条非 xhigh/max（含旧 high）`
+                  : "")
+              : "通过样本入库后自动统计；仅接受 xhigh / max"
+          }
+        />
         <AssistantTurnsPanel stats={stats} />
       </div>
 

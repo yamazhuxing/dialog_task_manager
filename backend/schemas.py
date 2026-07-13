@@ -125,6 +125,12 @@ class DashboardStats(BaseModel):
     assistant_turns_avg: float | None = None
     assistant_turns_sample_count: int = 0
     assistant_turns_missing_count: int = 0
+    thinking_effort_distribution: dict[str, int] = {}
+    thinking_ratio_ok: bool = False
+    thinking_range_ratio: float | None = None
+    thinking_effort_sample_count: int = 0
+    thinking_effort_missing_count: int = 0
+    invalid_thinking_effort_count: int = 0
 
 
 class UserStatsItem(BaseModel):
