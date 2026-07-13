@@ -9,6 +9,12 @@ from collections.abc import Callable
 
 from backend.config import Settings
 
+from backend.services.difficulty import (
+    DifficultyError,
+    read_difficulty_result,
+    run_difficulty_rating,
+    validate_difficulty_result,
+)
 from backend.services.questions import invalidate_delivery_zip_cache
 from backend.services.quality_report import refresh_delivery_report, remove_convert_metadata
 from backend.services.sample_paths import SourceSamplePaths, delivery_report_path
@@ -101,14 +107,6 @@ def _read_report_stats(pass_session_dir: Path) -> dict:
     return stats
 
 
-def _read_difficulty(pass_session_dir: Path) -> tuple[str | None, str | None]:
-    justification_file = pass_session_dir / "task_difficulty_justification.json"
-    if not justification_file.exists():
-        return None, None
-    data = json.loads(justification_file.read_text(encoding="utf-8"))
-    return data.get("task_difficulty"), data.get("justification")
-
-
 def _resolve_model_version(detected_model: str | None, session_id: str) -> str:
     model_version = model_version_from_detected(detected_model)
     if not model_version:
@@ -199,21 +197,24 @@ def run_sample_pipeline(
     progress("quality_check", "质量检测通过", "done")
 
     progress("difficulty", "正在评级任务难度...")
-    _run_script(
-        settings,
-        "batch_deepseek_simple.py",
-        [
-            "--input_dir",
-            str(pass_dir),
-            "--api_key",
-            settings.deepseek_api_key,
-            "--api_base",
-            settings.deepseek_api_base,
-        ],
-    )
-    progress("difficulty", "难度评级完成", "done")
-
-    difficulty, justification = _read_difficulty(pass_session_dir)
+    try:
+        run_difficulty_rating(settings, pass_dir)
+        difficulty, justification = read_difficulty_result(pass_session_dir)
+        difficulty, justification = validate_difficulty_result(
+            difficulty,
+            justification=justification,
+        )
+    except Exception as exc:
+        progress("difficulty", str(exc), "failed")
+        qc_stats = _read_report_stats(pass_session_dir)
+        if isinstance(exc, DifficultyError):
+            raise PipelineError(str(exc), session_id=session_id, qc_stats=qc_stats) from exc
+        raise PipelineError(
+            f"难度评级失败: {exc}",
+            session_id=session_id,
+            qc_stats=qc_stats,
+        ) from exc
+    progress("difficulty", f"难度评级完成: {difficulty}", "done")
     qc_stats = _read_report_stats(pass_session_dir)
 
     return {

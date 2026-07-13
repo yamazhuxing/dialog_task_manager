@@ -211,3 +211,22 @@ export async function deleteTask(taskId: number) {
   const { data } = await api.delete(`/tasks/${taskId}`);
   return data;
 }
+
+export interface InvalidDifficultySample {
+  task_id: number;
+  session_id: string;
+  username: string;
+  topic: string;
+  difficulty: string | null;
+  passed_at: string | null;
+}
+
+export async function fetchDifficultyRepairs() {
+  const { data } = await api.get<InvalidDifficultySample[]>("/admin/difficulty-repairs");
+  return data;
+}
+
+export async function retryTaskDifficulty(taskId: number) {
+  const { data } = await api.post(`/tasks/${taskId}/retry-difficulty`);
+  return data;
+}

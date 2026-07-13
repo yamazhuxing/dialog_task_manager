@@ -21,6 +21,8 @@ from backend.schemas import (
     TaskDeleteResponse,
     TaskDetail,
     TaskListItem,
+    DifficultyRetryResponse,
+    InvalidDifficultySampleItem,
     UserStatsItem,
 )
 from backend.services.pipeline import (
@@ -50,6 +52,7 @@ from backend.services.questions import (
     import_questions_from_data,
     load_questions_file,
 )
+from backend.services.difficulty import DifficultyError, list_invalid_difficulty_samples, rerate_passed_sample
 from backend.services.tasks import (
     claim_task,
     delete_task,
@@ -500,3 +503,24 @@ def download_raw_delivery_zip(db: Session = Depends(get_db), _: User = Depends(r
         media_type="application/zip",
         headers={"Cache-Control": "no-store"},
     )
+
+
+@router.get("/admin/difficulty-repairs", response_model=list[InvalidDifficultySampleItem])
+def difficulty_repairs(
+    db: Session = Depends(get_db),
+    _: User = Depends(require_admin),
+) -> list[InvalidDifficultySampleItem]:
+    return list_invalid_difficulty_samples(db)
+
+
+@router.post("/tasks/{task_id}/retry-difficulty", response_model=DifficultyRetryResponse)
+def retry_task_difficulty(
+    task_id: int,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_admin),
+) -> DifficultyRetryResponse:
+    try:
+        result = rerate_passed_sample(db, settings, task_id)
+    except DifficultyError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return DifficultyRetryResponse(**result)

@@ -171,3 +171,20 @@ class TaskCreateResponse(BaseModel):
 class TaskDeleteResponse(BaseModel):
     id: int
     message: str
+
+
+class InvalidDifficultySampleItem(BaseModel):
+    task_id: int
+    session_id: str
+    username: str
+    topic: str
+    difficulty: str | None = None
+    passed_at: datetime | None = None
+
+
+class DifficultyRetryResponse(BaseModel):
+    task_id: int
+    session_id: str
+    difficulty: str
+    justification: str | None = None
+    message: str

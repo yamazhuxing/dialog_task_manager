@@ -3,10 +3,13 @@ import {
   createTask,
   createUser,
   deleteTask,
+  fetchDifficultyRepairs,
   fetchScenes,
   fetchUserStats,
   getToken,
   importQuestionsFile,
+  InvalidDifficultySample,
+  retryTaskDifficulty,
   SceneOption,
 } from "../api/client";
 
@@ -35,6 +38,16 @@ function formatFileSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+function formatApiDateTime(value: string | null) {
+  if (!value) return "-";
+  const normalized = /[zZ]|[+-]\d{2}:?\d{2}$/.test(value) ? value : `${value}Z`;
+  return new Date(normalized).toLocaleString("zh-CN", { timeZone: "Asia/Shanghai" });
+}
+
+function loadDifficultyRepairs(setItems: (items: InvalidDifficultySample[]) => void) {
+  fetchDifficultyRepairs().then(setItems).catch(console.error);
+}
+
 export function AdminPage() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -58,9 +71,12 @@ export function AdminPage() {
   const [creatingTask, setCreatingTask] = useState(false);
   const [deleteTaskId, setDeleteTaskId] = useState("");
   const [deletingTask, setDeletingTask] = useState(false);
+  const [difficultyRepairs, setDifficultyRepairs] = useState<InvalidDifficultySample[]>([]);
+  const [retryingDifficultyTaskId, setRetryingDifficultyTaskId] = useState<number | null>(null);
 
   useEffect(() => {
     loadUserStats(setUserStats);
+    loadDifficultyRepairs(setDifficultyRepairs);
     fetchScenes()
       .then((items) => {
         setScenes(items);
@@ -255,6 +271,22 @@ export function AdminPage() {
     }
   };
 
+  const onRetryDifficulty = async (taskId: number) => {
+    if (retryingDifficultyTaskId != null) return;
+    setRetryingDifficultyTaskId(taskId);
+    setMessage("");
+    try {
+      const result = await retryTaskDifficulty(taskId);
+      setMessage(`任务 #${taskId} 难度补评成功：${result.difficulty}`);
+      loadDifficultyRepairs(setDifficultyRepairs);
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+      setMessage(msg || `任务 #${taskId} 难度补评失败`);
+    } finally {
+      setRetryingDifficultyTaskId(null);
+    }
+  };
+
   const onDownloadZip = () =>
     downloadDeliveryZip("/api/delivery/zip", "delivery", "交付 ZIP ");
 
@@ -338,6 +370,65 @@ export function AdminPage() {
         <p className="text-xs text-slate-500">
           领取/占用 = 当前占用或已完成的任务数；制作中 = 已领取但未通过；提交 = 上传次数（含失败重试）
         </p>
+      </div>
+
+      <div className="card space-y-4">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 className="font-medium">难度补评</h2>
+            <p className="mt-1 text-sm text-slate-400">
+              已通过但难度无效（如 API 欠费导致「调用失败」）的样本，可在此重新评级并同步数据库与交付物
+            </p>
+          </div>
+          <button
+            className="btn btn-secondary px-3 py-1 text-xs"
+            onClick={() => loadDifficultyRepairs(setDifficultyRepairs)}
+          >
+            刷新
+          </button>
+        </div>
+        <div className="overflow-x-auto rounded-xl border border-white/10">
+          <table className="w-full min-w-[720px] text-left text-sm">
+            <thead className="bg-white/5 text-xs text-slate-400">
+              <tr>
+                <th className="px-3 py-2 font-medium">任务</th>
+                <th className="px-3 py-2 font-medium">用户</th>
+                <th className="px-3 py-2 font-medium">当前难度</th>
+                <th className="px-3 py-2 font-medium">通过时间</th>
+                <th className="px-3 py-2 font-medium">操作</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-white/5">
+              {difficultyRepairs.map((item) => (
+                <tr key={item.task_id}>
+                  <td className="px-3 py-2">
+                    <div className="font-medium">#{item.task_id}</div>
+                    <div className="mt-1 max-w-xs truncate text-xs text-slate-500">{item.topic}</div>
+                  </td>
+                  <td className="px-3 py-2">{item.username}</td>
+                  <td className="px-3 py-2 text-amber-300">{item.difficulty || "（空）"}</td>
+                  <td className="px-3 py-2 text-slate-400">{formatApiDateTime(item.passed_at)}</td>
+                  <td className="px-3 py-2">
+                    <button
+                      className="btn btn-primary px-3 py-1 text-xs"
+                      disabled={retryingDifficultyTaskId != null}
+                      onClick={() => onRetryDifficulty(item.task_id)}
+                    >
+                      {retryingDifficultyTaskId === item.task_id ? "评级中..." : "重新评级"}
+                    </button>
+                  </td>
+                </tr>
+              ))}
+              {difficultyRepairs.length === 0 && (
+                <tr>
+                  <td colSpan={5} className="px-3 py-6 text-center text-slate-500">
+                    暂无需要补评的已通过样本
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
 
       <div className="card space-y-4">
