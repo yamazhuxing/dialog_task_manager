@@ -269,9 +269,9 @@ def process_openclaw_jsonl(jsonl_path, system_prompt):
     # 标准化模型名称
     model_name = MODEL_NAME_MAP.get(raw_model, raw_model)
     
-    # 处理 thinking_effort
+    # 处理 thinking_effort（保留原始值，不兜底为 high）
     if isinstance(thinking_effort, dict):
-        thinking_effort = thinking_effort.get("type", "high")
+        thinking_effort = thinking_effort.get("type")
 
     # 收集所有使用的工具
     all_tool_names = set()
@@ -377,7 +377,7 @@ def process_openclaw_jsonl(jsonl_path, system_prompt):
                 "session_id": session_id,
                 "request_id": request_id,
                 "timestamp": real_timestamp,
-                "thinking_effort": thinking_effort if thinking_effort in ("high", "xhigh", "max") else "high",
+                "thinking_effort": thinking_effort,
                 "request": {
                     "model": model_name,
                     "max_tokens": max_tokens,
