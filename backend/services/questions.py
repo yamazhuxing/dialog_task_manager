@@ -316,7 +316,7 @@ def _resolve_v2_pass_dir(settings: Settings, sample: Sample) -> Path | None:
     return None
 
 
-def _build_qc_record_workbook(rows: list[dict], *, group: str, submitter: str) -> bytes:
+def _build_qc_record_workbook(rows: list[dict], *, group: str) -> bytes:
     """生成质检提交记录.xlsx（分组 / 提交者 / sessionId / 对话场景）。"""
     wb = Workbook()
     ws = wb.active
@@ -326,7 +326,7 @@ def _build_qc_record_workbook(rows: list[dict], *, group: str, submitter: str) -
         ws.cell(1, col, header)
     for idx, row in enumerate(rows, start=2):
         ws.cell(idx, 1, group)
-        ws.cell(idx, 2, submitter)
+        ws.cell(idx, 2, row["submitter"])
         ws.cell(idx, 3, row["session_storage_name"])
         ws.cell(idx, 4, row["scene_label"])
     buffer = io.BytesIO()
@@ -339,12 +339,12 @@ def _v2_delivery_fingerprint(
     settings: Settings,
     *,
     group: str,
-    submitter: str,
-) -> tuple[int, float, list[dict], str, str]:
+) -> tuple[int, float, list[dict], str]:
     """统计新版交付条目与最新 mtime。"""
     rows = (
-        db.query(Sample, Task)
+        db.query(Sample, Task, User.username)
         .join(Task, Sample.task_id == Task.id)
+        .join(User, Sample.user_id == User.id)
         .order_by(Sample.id.asc())
         .all()
     )
@@ -354,7 +354,7 @@ def _v2_delivery_fingerprint(
     entries: list[dict] = []
     file_count = 0
     max_mtime = 0.0
-    for sample, task in rows:
+    for sample, task, username in rows:
         pass_dir = _resolve_v2_pass_dir(settings, sample)
         if pass_dir is None:
             continue
@@ -363,7 +363,6 @@ def _v2_delivery_fingerprint(
         for file_path in pass_dir.rglob("*"):
             if not file_path.is_file():
                 continue
-            # 交付包内不要带 sample_metadata.json 外的临时/隐藏文件；其余正式产物全收
             session_files.append(file_path)
             file_count += 1
             max_mtime = max(max_mtime, file_path.stat().st_mtime)
@@ -374,6 +373,7 @@ def _v2_delivery_fingerprint(
                 "source_type": sample.source_type,
                 "session_storage_name": storage_name,
                 "scene_label": task.scene_label or task.scene,
+                "submitter": username,
                 "pass_dir": pass_dir,
                 "files": session_files,
             }
@@ -382,18 +382,17 @@ def _v2_delivery_fingerprint(
     if not entries:
         raise FileNotFoundError("暂无可打包的 pass 样本目录，请检查 samples 目录")
 
-    return file_count, max_mtime, entries, group.strip(), submitter.strip()
+    return file_count, max_mtime, entries, group.strip()
 
 
 def _write_v2_delivery_zip(
     entries: list[dict],
     *,
     group: str,
-    submitter: str,
     zip_path: Path,
 ) -> None:
     zip_path.parent.mkdir(parents=True, exist_ok=True)
-    xlsx_bytes = _build_qc_record_workbook(entries, group=group, submitter=submitter)
+    xlsx_bytes = _build_qc_record_workbook(entries, group=group)
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED, compresslevel=1) as zf:
         zf.writestr(QC_RECORD_XLSX_NAME, xlsx_bytes)
         for item in entries:
@@ -408,7 +407,6 @@ def create_v2_delivery_zip(
     settings: Settings,
     *,
     group: str,
-    submitter: str,
     force: bool = False,
 ) -> Path:
     """
@@ -416,17 +414,15 @@ def create_v2_delivery_zip(
       质检提交记录.xlsx
       hermes/{taskId_sessionId}/...（仅 pass）
       openclaw/{taskId_sessionId}/...（仅 pass）
+    提交者按样本实际用户名逐行写入。
     """
     if not group.strip():
         raise ValueError("分组不能为空")
-    if not submitter.strip():
-        raise ValueError("提交者不能为空")
 
-    file_count, max_mtime, entries, group_value, submitter_value = _v2_delivery_fingerprint(
+    file_count, max_mtime, entries, group_value = _v2_delivery_fingerprint(
         db,
         settings,
         group=group,
-        submitter=submitter,
     )
     cache_zip = settings.data_dir / V2_DELIVERY_ZIP_NAME
     cache_meta = settings.data_dir / V2_DELIVERY_ZIP_META_NAME
@@ -439,15 +435,14 @@ def create_v2_delivery_zip(
         and cached.get("file_count") == file_count
         and cached.get("max_mtime") == max_mtime
         and cached.get("group") == group_value
-        and cached.get("submitter") == submitter_value
         and cached.get("entry_count") == len(entries)
+        and cached.get("submitter_mode") == "per_user"
     ):
         return cache_zip
 
     _write_v2_delivery_zip(
         entries,
         group=group_value,
-        submitter=submitter_value,
         zip_path=cache_zip,
     )
     cache_meta.write_text(
@@ -457,7 +452,7 @@ def create_v2_delivery_zip(
                 "max_mtime": max_mtime,
                 "entry_count": len(entries),
                 "group": group_value,
-                "submitter": submitter_value,
+                "submitter_mode": "per_user",
                 "built_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
             },
             ensure_ascii=False,

@@ -74,7 +74,6 @@ export function AdminPage() {
   const [difficultyRepairs, setDifficultyRepairs] = useState<InvalidDifficultySample[]>([]);
   const [retryingDifficultyTaskId, setRetryingDifficultyTaskId] = useState<number | null>(null);
   const [deliveryGroup, setDeliveryGroup] = useState("5组");
-  const [deliverySubmitter, setDeliverySubmitter] = useState("野马逐星&Betsy");
 
   useEffect(() => {
     loadUserStats(setUserStats);
@@ -298,7 +297,6 @@ export function AdminPage() {
   const onDownloadV2Zip = () => {
     const params = new URLSearchParams({
       group: deliveryGroup.trim() || "5组",
-      submitter: deliverySubmitter.trim() || "野马逐星&Betsy",
     });
     downloadDeliveryZip(`/api/delivery/v2-zip?${params.toString()}`, "delivery_v2", "新版交付 ZIP ");
   };
@@ -626,7 +624,7 @@ export function AdminPage() {
         </p>
         <p className="text-sm text-slate-400">
           新版交付：质检提交记录.xlsx + hermes/ + openclaw/，其中来源目录仅包含 pass 通过样本（含 call 文件、难度与
-          metadata）；sessionId 使用任务ID_sessionUUID，与目录名一致。
+          metadata）；sessionId 使用任务ID_sessionUUID，与目录名一致；提交者按各样本实际上传用户名写入。
         </p>
         {downloadProgress && (
           <div className="space-y-2 rounded-xl border border-white/10 bg-black/20 p-4">
@@ -655,16 +653,6 @@ export function AdminPage() {
               value={deliveryGroup}
               onChange={(e) => setDeliveryGroup(e.target.value)}
               placeholder="如：5组"
-              disabled={downloadingZip}
-            />
-          </label>
-          <label className="block text-sm">
-            <span className="mb-1 block text-slate-400">新版交付 · 提交者</span>
-            <input
-              className="input"
-              value={deliverySubmitter}
-              onChange={(e) => setDeliverySubmitter(e.target.value)}
-              placeholder="如：野马逐星&Betsy"
               disabled={downloadingZip}
             />
           </label>
