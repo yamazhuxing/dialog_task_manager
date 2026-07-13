@@ -4,7 +4,6 @@ import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 
-from openpyxl import Workbook
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -318,6 +317,11 @@ def _resolve_v2_pass_dir(settings: Settings, sample: Sample) -> Path | None:
 
 def _build_qc_record_workbook(rows: list[dict], *, group: str) -> bytes:
     """生成质检提交记录.xlsx（分组 / 提交者 / sessionId / 对话场景）。"""
+    try:
+        from openpyxl import Workbook
+    except ImportError as exc:
+        raise RuntimeError("缺少 openpyxl 依赖，请在服务器执行: uv sync") from exc
+
     wb = Workbook()
     ws = wb.active
     ws.title = "Sheet1"
