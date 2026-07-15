@@ -288,9 +288,6 @@ export function AdminPage() {
     }
   };
 
-  const onDownloadZip = () =>
-    downloadDeliveryZip("/api/delivery/zip", "delivery", "交付 ZIP ");
-
   const onDownloadRawZip = () =>
     downloadDeliveryZip("/api/delivery/raw-zip", "delivery_raw", "原始数据 ZIP ");
 
@@ -615,16 +612,12 @@ export function AdminPage() {
       <div className="card space-y-4">
         <h2 className="font-medium">交付物下载</h2>
         <p className="text-sm text-slate-400">
-          转换后交付：打包 OpenClaw 与 Hermes 各自的「待质检数据」和「质检结果」目录（有通过样本的来源会包含；含 report 与
-          sample_metadata.json）。首次下载或新增样本后会重新打包，之后重复下载会使用缓存加速。
+          新版交付：质检提交记录.xlsx + hermes/ + openclaw/，来源目录仅包含 pass 通过样本；目录名、难度文件中的
+          session_id 与 call 内真实 session_id 一致（不含平台任务前缀）；不包含 sample_metadata.json；提交者按各样本实际上传用户名写入。
         </p>
         <p className="text-sm text-slate-400">
           原始上传：打包各已通过样本的用户上传文件（OpenClaw 为 .jsonl，Hermes 为 .json），按来源分子目录，并附带
           raw_manifest.json（任务、用户、session 对照表）。
-        </p>
-        <p className="text-sm text-slate-400">
-          新版交付：质检提交记录.xlsx + hermes/ + openclaw/，其中来源目录仅包含 pass 通过样本（含 call 文件、难度与
-          metadata）；sessionId 使用任务ID_sessionUUID，与目录名一致；提交者按各样本实际上传用户名写入。
         </p>
         {downloadProgress && (
           <div className="space-y-2 rounded-xl border border-white/10 bg-black/20 p-4">
@@ -660,14 +653,14 @@ export function AdminPage() {
         <div className="flex flex-wrap gap-2">
           <button
             className="btn btn-primary"
-            onClick={onDownloadZip}
+            onClick={onDownloadV2Zip}
             disabled={downloadingZip}
           >
             {downloadingZip
               ? downloadProgress?.phase === "downloading" && downloadProgress.percent != null
                 ? `下载中 ${downloadProgress.percent}%`
                 : "打包中..."
-              : "下载转换后 ZIP"}
+              : "下载新版交付 ZIP"}
           </button>
           <button
             className="btn btn-secondary"
@@ -679,17 +672,6 @@ export function AdminPage() {
                 ? `下载中 ${downloadProgress.percent}%`
                 : "打包中..."
               : "下载原始上传 ZIP"}
-          </button>
-          <button
-            className="btn btn-secondary"
-            onClick={onDownloadV2Zip}
-            disabled={downloadingZip}
-          >
-            {downloadingZip
-              ? downloadProgress?.phase === "downloading" && downloadProgress.percent != null
-                ? `下载中 ${downloadProgress.percent}%`
-                : "打包中..."
-              : "下载新版交付 ZIP"}
           </button>
         </div>
       </div>

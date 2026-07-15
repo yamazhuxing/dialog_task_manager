@@ -515,7 +515,7 @@ def download_v2_delivery_zip(
     db: Session = Depends(get_db),
     _: User = Depends(require_admin),
 ):
-    """新版交付 ZIP：质检提交记录.xlsx + hermes/openclaw 仅 pass 目录；提交者为各样本用户名。"""
+    """新版交付 ZIP：质检提交记录.xlsx + hermes/openclaw 仅 pass；目录与难度 session_id 去任务前缀，不含 sample_metadata。"""
     from fastapi.responses import FileResponse
 
     try:

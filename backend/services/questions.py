@@ -4,6 +4,7 @@ import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 
+from openpyxl import Workbook
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -22,6 +23,9 @@ V2_DELIVERY_ZIP_NAME = "delivery_v2_latest.zip"
 V2_DELIVERY_ZIP_META_NAME = "delivery_v2_latest.meta.json"
 RAW_MANIFEST_NAME = "raw_manifest.json"
 QC_RECORD_XLSX_NAME = "质检提交记录.xlsx"
+SAMPLE_METADATA_FILENAME = "sample_metadata.json"
+DIFFICULTY_JUSTIFICATION_FILENAME = "task_difficulty_justification.json"
+V2_DELIVERY_LAYOUT = "session_id_only_no_metadata"
 
 
 def import_questions_from_data(
@@ -317,11 +321,6 @@ def _resolve_v2_pass_dir(settings: Settings, sample: Sample) -> Path | None:
 
 def _build_qc_record_workbook(rows: list[dict], *, group: str) -> bytes:
     """生成质检提交记录.xlsx（分组 / 提交者 / sessionId / 对话场景）。"""
-    try:
-        from openpyxl import Workbook
-    except ImportError as exc:
-        raise RuntimeError("缺少 openpyxl 依赖，请在服务器执行: uv sync") from exc
-
     wb = Workbook()
     ws = wb.active
     ws.title = "Sheet1"
@@ -331,11 +330,25 @@ def _build_qc_record_workbook(rows: list[dict], *, group: str) -> bytes:
     for idx, row in enumerate(rows, start=2):
         ws.cell(idx, 1, group)
         ws.cell(idx, 2, row["submitter"])
-        ws.cell(idx, 3, row["session_storage_name"])
+        ws.cell(idx, 3, row["session_id"])
         ws.cell(idx, 4, row["scene_label"])
     buffer = io.BytesIO()
     wb.save(buffer)
     return buffer.getvalue()
+
+
+def _rewrite_difficulty_justification(content: bytes, session_id: str) -> bytes:
+    """将难度文件中的 session_id 纠正为对话真实 session_id（去掉 task 前缀）。"""
+    try:
+        data = json.loads(content.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return content
+    if not isinstance(data, dict):
+        return content
+    if data.get("session_id") == session_id:
+        return content
+    data["session_id"] = session_id
+    return json.dumps(data, ensure_ascii=False, indent=2).encode("utf-8") + b"\n"
 
 
 def _v2_delivery_fingerprint(
@@ -362,10 +375,11 @@ def _v2_delivery_fingerprint(
         pass_dir = _resolve_v2_pass_dir(settings, sample)
         if pass_dir is None:
             continue
-        storage_name = sample_storage_dir_name(sample.task_id, sample.session_id)
         session_files: list[Path] = []
         for file_path in pass_dir.rglob("*"):
             if not file_path.is_file():
+                continue
+            if file_path.name == SAMPLE_METADATA_FILENAME:
                 continue
             session_files.append(file_path)
             file_count += 1
@@ -375,7 +389,7 @@ def _v2_delivery_fingerprint(
         entries.append(
             {
                 "source_type": sample.source_type,
-                "session_storage_name": storage_name,
+                "session_id": sample.session_id,
                 "scene_label": task.scene_label or task.scene,
                 "submitter": username,
                 "pass_dir": pass_dir,
@@ -400,10 +414,17 @@ def _write_v2_delivery_zip(
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED, compresslevel=1) as zf:
         zf.writestr(QC_RECORD_XLSX_NAME, xlsx_bytes)
         for item in entries:
+            session_id = item["session_id"]
             for file_path in item["files"]:
+                if file_path.name == SAMPLE_METADATA_FILENAME:
+                    continue
                 relative = file_path.relative_to(item["pass_dir"]).as_posix()
-                arcname = f"{item['source_type']}/{item['session_storage_name']}/{relative}"
-                zf.write(file_path, arcname)
+                arcname = f"{item['source_type']}/{session_id}/{relative}"
+                if file_path.name == DIFFICULTY_JUSTIFICATION_FILENAME:
+                    raw = file_path.read_bytes()
+                    zf.writestr(arcname, _rewrite_difficulty_justification(raw, session_id))
+                else:
+                    zf.write(file_path, arcname)
 
 
 def create_v2_delivery_zip(
@@ -416,9 +437,9 @@ def create_v2_delivery_zip(
     """
     新版交付 ZIP：
       质检提交记录.xlsx
-      hermes/{taskId_sessionId}/...（仅 pass）
-      openclaw/{taskId_sessionId}/...（仅 pass）
-    提交者按样本实际用户名逐行写入。
+      hermes/{sessionId}/...（仅 pass，目录名与 call 内 session_id 一致）
+      openclaw/{sessionId}/...（仅 pass）
+    不含 sample_metadata.json；提交者按样本实际用户名逐行写入。
     """
     if not group.strip():
         raise ValueError("分组不能为空")
@@ -441,6 +462,7 @@ def create_v2_delivery_zip(
         and cached.get("group") == group_value
         and cached.get("entry_count") == len(entries)
         and cached.get("submitter_mode") == "per_user"
+        and cached.get("layout") == V2_DELIVERY_LAYOUT
     ):
         return cache_zip
 
@@ -457,6 +479,7 @@ def create_v2_delivery_zip(
                 "entry_count": len(entries),
                 "group": group_value,
                 "submitter_mode": "per_user",
+                "layout": V2_DELIVERY_LAYOUT,
                 "built_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
             },
             ensure_ascii=False,
