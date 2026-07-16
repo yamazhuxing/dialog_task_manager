@@ -73,7 +73,6 @@ export function AdminPage() {
   const [deletingTask, setDeletingTask] = useState(false);
   const [difficultyRepairs, setDifficultyRepairs] = useState<InvalidDifficultySample[]>([]);
   const [retryingDifficultyTaskId, setRetryingDifficultyTaskId] = useState<number | null>(null);
-  const [deliveryGroup, setDeliveryGroup] = useState("5组");
 
   useEffect(() => {
     loadUserStats(setUserStats);
@@ -291,12 +290,8 @@ export function AdminPage() {
   const onDownloadRawZip = () =>
     downloadDeliveryZip("/api/delivery/raw-zip", "delivery_raw", "原始数据 ZIP ");
 
-  const onDownloadV2Zip = () => {
-    const params = new URLSearchParams({
-      group: deliveryGroup.trim() || "5组",
-    });
-    downloadDeliveryZip(`/api/delivery/v2-zip?${params.toString()}`, "delivery_v2", "新版交付 ZIP ");
-  };
+  const onDownloadV2Zip = () =>
+    downloadDeliveryZip("/api/delivery/v2-zip", "delivery_v2", "新版交付 ZIP ");
 
   return (
     <div className="space-y-6">
@@ -612,8 +607,8 @@ export function AdminPage() {
       <div className="card space-y-4">
         <h2 className="font-medium">交付物下载</h2>
         <p className="text-sm text-slate-400">
-          新版交付：质检提交记录.xlsx + hermes/ + openclaw/，来源目录仅包含 pass 通过样本；目录名、难度文件中的
-          session_id 与 call 内真实 session_id 一致（不含平台任务前缀）；不包含 sample_metadata.json；提交者按各样本实际上传用户名写入。
+          新版交付：session-scene.jsonl + hermes/ + openclaw/，来源目录仅包含 pass 通过样本；目录名、难度文件中的
+          session_id 与 call 内真实 session_id 一致（不含平台任务前缀）；不包含 sample_metadata.json。
         </p>
         <p className="text-sm text-slate-400">
           原始上传：打包各已通过样本的用户上传文件（OpenClaw 为 .jsonl，Hermes 为 .json），按来源分子目录，并附带
@@ -638,18 +633,6 @@ export function AdminPage() {
             )}
           </div>
         )}
-        <div className="grid gap-3 md:grid-cols-2">
-          <label className="block text-sm">
-            <span className="mb-1 block text-slate-400">新版交付 · 分组</span>
-            <input
-              className="input"
-              value={deliveryGroup}
-              onChange={(e) => setDeliveryGroup(e.target.value)}
-              placeholder="如：5组"
-              disabled={downloadingZip}
-            />
-          </label>
-        </div>
         <div className="flex flex-wrap gap-2">
           <button
             className="btn btn-primary"

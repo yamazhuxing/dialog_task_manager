@@ -511,17 +511,14 @@ def download_raw_delivery_zip(db: Session = Depends(get_db), _: User = Depends(r
 
 @router.get("/delivery/v2-zip")
 def download_v2_delivery_zip(
-    group: str = "5组",
     db: Session = Depends(get_db),
     _: User = Depends(require_admin),
 ):
-    """新版交付 ZIP：质检提交记录.xlsx + hermes/openclaw 仅 pass；目录与难度 session_id 去任务前缀，不含 sample_metadata。"""
+    """新版交付 ZIP：session-scene.jsonl + hermes/openclaw 仅 pass；目录与难度 session_id 去任务前缀，不含 sample_metadata。"""
     from fastapi.responses import FileResponse
 
     try:
-        zip_path = create_v2_delivery_zip(db, settings, group=group)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        zip_path = create_v2_delivery_zip(db, settings)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return FileResponse(

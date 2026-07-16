@@ -1,10 +1,8 @@
-import io
 import json
 import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 
-from openpyxl import Workbook
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -22,10 +20,10 @@ RAW_DELIVERY_ZIP_META_NAME = "delivery_raw_latest.meta.json"
 V2_DELIVERY_ZIP_NAME = "delivery_v2_latest.zip"
 V2_DELIVERY_ZIP_META_NAME = "delivery_v2_latest.meta.json"
 RAW_MANIFEST_NAME = "raw_manifest.json"
-QC_RECORD_XLSX_NAME = "质检提交记录.xlsx"
+SESSION_SCENE_JSONL_NAME = "session-scene.jsonl"
 SAMPLE_METADATA_FILENAME = "sample_metadata.json"
 DIFFICULTY_JUSTIFICATION_FILENAME = "task_difficulty_justification.json"
-V2_DELIVERY_LAYOUT = "session_id_only_no_metadata"
+V2_DELIVERY_LAYOUT = "session_scene_jsonl"
 
 
 def import_questions_from_data(
@@ -319,22 +317,20 @@ def _resolve_v2_pass_dir(settings: Settings, sample: Sample) -> Path | None:
     return None
 
 
-def _build_qc_record_workbook(rows: list[dict], *, group: str) -> bytes:
-    """生成质检提交记录.xlsx（分组 / 提交者 / sessionId / 对话场景）。"""
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "Sheet1"
-    headers = ["分组", "提交者", "sessionId", "对话场景"]
-    for col, header in enumerate(headers, start=1):
-        ws.cell(1, col, header)
-    for idx, row in enumerate(rows, start=2):
-        ws.cell(idx, 1, group)
-        ws.cell(idx, 2, row["submitter"])
-        ws.cell(idx, 3, row["session_id"])
-        ws.cell(idx, 4, row["scene_label"])
-    buffer = io.BytesIO()
-    wb.save(buffer)
-    return buffer.getvalue()
+def _build_session_scene_jsonl(rows: list[dict]) -> bytes:
+    """生成 session-scene.jsonl：每行 {"session_id": "...", "scene": "..."}。"""
+    lines: list[str] = []
+    for row in rows:
+        lines.append(
+            json.dumps(
+                {
+                    "session_id": row["session_id"],
+                    "scene": row["scene"],
+                },
+                ensure_ascii=False,
+            )
+        )
+    return ("\n".join(lines) + ("\n" if lines else "")).encode("utf-8")
 
 
 def _rewrite_difficulty_justification(content: bytes, session_id: str) -> bytes:
@@ -354,14 +350,11 @@ def _rewrite_difficulty_justification(content: bytes, session_id: str) -> bytes:
 def _v2_delivery_fingerprint(
     db: Session,
     settings: Settings,
-    *,
-    group: str,
-) -> tuple[int, float, list[dict], str]:
+) -> tuple[int, float, list[dict]]:
     """统计新版交付条目与最新 mtime。"""
     rows = (
-        db.query(Sample, Task, User.username)
+        db.query(Sample, Task)
         .join(Task, Sample.task_id == Task.id)
-        .join(User, Sample.user_id == User.id)
         .order_by(Sample.id.asc())
         .all()
     )
@@ -371,7 +364,7 @@ def _v2_delivery_fingerprint(
     entries: list[dict] = []
     file_count = 0
     max_mtime = 0.0
-    for sample, task, username in rows:
+    for sample, task in rows:
         pass_dir = _resolve_v2_pass_dir(settings, sample)
         if pass_dir is None:
             continue
@@ -390,8 +383,7 @@ def _v2_delivery_fingerprint(
             {
                 "source_type": sample.source_type,
                 "session_id": sample.session_id,
-                "scene_label": task.scene_label or task.scene,
-                "submitter": username,
+                "scene": task.scene_label or task.scene or sample.scene,
                 "pass_dir": pass_dir,
                 "files": session_files,
             }
@@ -400,19 +392,18 @@ def _v2_delivery_fingerprint(
     if not entries:
         raise FileNotFoundError("暂无可打包的 pass 样本目录，请检查 samples 目录")
 
-    return file_count, max_mtime, entries, group.strip()
+    return file_count, max_mtime, entries
 
 
 def _write_v2_delivery_zip(
     entries: list[dict],
     *,
-    group: str,
     zip_path: Path,
 ) -> None:
     zip_path.parent.mkdir(parents=True, exist_ok=True)
-    xlsx_bytes = _build_qc_record_workbook(entries, group=group)
+    jsonl_bytes = _build_session_scene_jsonl(entries)
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED, compresslevel=1) as zf:
-        zf.writestr(QC_RECORD_XLSX_NAME, xlsx_bytes)
+        zf.writestr(SESSION_SCENE_JSONL_NAME, jsonl_bytes)
         for item in entries:
             session_id = item["session_id"]
             for file_path in item["files"]:
@@ -431,24 +422,16 @@ def create_v2_delivery_zip(
     db: Session,
     settings: Settings,
     *,
-    group: str,
     force: bool = False,
 ) -> Path:
     """
     新版交付 ZIP：
-      质检提交记录.xlsx
+      session-scene.jsonl
       hermes/{sessionId}/...（仅 pass，目录名与 call 内 session_id 一致）
       openclaw/{sessionId}/...（仅 pass）
-    不含 sample_metadata.json；提交者按样本实际用户名逐行写入。
+    不含 sample_metadata.json。
     """
-    if not group.strip():
-        raise ValueError("分组不能为空")
-
-    file_count, max_mtime, entries, group_value = _v2_delivery_fingerprint(
-        db,
-        settings,
-        group=group,
-    )
+    file_count, max_mtime, entries = _v2_delivery_fingerprint(db, settings)
     cache_zip = settings.data_dir / V2_DELIVERY_ZIP_NAME
     cache_meta = settings.data_dir / V2_DELIVERY_ZIP_META_NAME
 
@@ -459,26 +442,18 @@ def create_v2_delivery_zip(
         and cached
         and cached.get("file_count") == file_count
         and cached.get("max_mtime") == max_mtime
-        and cached.get("group") == group_value
         and cached.get("entry_count") == len(entries)
-        and cached.get("submitter_mode") == "per_user"
         and cached.get("layout") == V2_DELIVERY_LAYOUT
     ):
         return cache_zip
 
-    _write_v2_delivery_zip(
-        entries,
-        group=group_value,
-        zip_path=cache_zip,
-    )
+    _write_v2_delivery_zip(entries, zip_path=cache_zip)
     cache_meta.write_text(
         json.dumps(
             {
                 "file_count": file_count,
                 "max_mtime": max_mtime,
                 "entry_count": len(entries),
-                "group": group_value,
-                "submitter_mode": "per_user",
                 "layout": V2_DELIVERY_LAYOUT,
                 "built_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
             },
