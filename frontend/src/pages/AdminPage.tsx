@@ -13,6 +13,7 @@ import {
   retryTaskDifficulty,
   SceneOption,
   ZipQcResponse,
+  ZipQcSessionResult,
 } from "../api/client";
 
 interface UserStat {
@@ -50,6 +51,14 @@ function loadDifficultyRepairs(setItems: (items: InvalidDifficultySample[]) => v
   fetchDifficultyRepairs().then(setItems).catch(console.error);
 }
 
+function formatElapsed(ms: number): string {
+  const totalSec = Math.max(0, Math.floor(ms / 1000));
+  const min = Math.floor(totalSec / 60);
+  const sec = totalSec % 60;
+  if (min <= 0) return `${sec} 秒`;
+  return `${min} 分 ${sec.toString().padStart(2, "0")} 秒`;
+}
+
 export function AdminPage() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -78,7 +87,17 @@ export function AdminPage() {
   const [qcZipFile, setQcZipFile] = useState<File | null>(null);
   const [qcZipChecking, setQcZipChecking] = useState(false);
   const [qcZipResult, setQcZipResult] = useState<ZipQcResponse | null>(null);
+  const [qcZipProgress, setQcZipProgress] = useState<{
+    phase: "upload" | "extract" | "discover" | "checking" | "done";
+    message: string;
+    uploadPercent: number | null;
+    current: number;
+    total: number;
+    elapsedMs: number;
+    latestSession: ZipQcSessionResult | null;
+  } | null>(null);
   const qcZipInputRef = useRef<HTMLInputElement>(null);
+  const qcZipStartedAtRef = useRef<number | null>(null);
 
   useEffect(() => {
     loadUserStats(setUserStats);
@@ -90,6 +109,16 @@ export function AdminPage() {
       })
       .catch(console.error);
   }, []);
+
+  useEffect(() => {
+    if (!qcZipChecking) return undefined;
+    const timer = window.setInterval(() => {
+      if (qcZipStartedAtRef.current == null) return;
+      const elapsedMs = Date.now() - qcZipStartedAtRef.current;
+      setQcZipProgress((prev) => (prev ? { ...prev, elapsedMs } : prev));
+    }, 250);
+    return () => window.clearInterval(timer);
+  }, [qcZipChecking]);
 
   const pickFile = (file: File | null) => {
     if (!file) return;
@@ -307,12 +336,14 @@ export function AdminPage() {
     }
     setQcZipFile(file);
     setQcZipResult(null);
+    setQcZipProgress(null);
     setMessage("");
   };
 
   const clearQcZip = () => {
     setQcZipFile(null);
     setQcZipResult(null);
+    setQcZipProgress(null);
     if (qcZipInputRef.current) qcZipInputRef.current.value = "";
   };
 
@@ -321,18 +352,91 @@ export function AdminPage() {
     setQcZipChecking(true);
     setMessage("");
     setQcZipResult(null);
+    qcZipStartedAtRef.current = Date.now();
+    setQcZipProgress({
+      phase: "upload",
+      message: "正在上传 ZIP...",
+      uploadPercent: 0,
+      current: 0,
+      total: 0,
+      elapsedMs: 0,
+      latestSession: null,
+    });
     try {
-      const result = await qcExternalZip(qcZipFile);
+      const result = await qcExternalZip(qcZipFile, (event) => {
+        const elapsedMs =
+          qcZipStartedAtRef.current != null ? Date.now() - qcZipStartedAtRef.current : 0;
+        if (event.type === "upload") {
+          setQcZipProgress((prev) => ({
+            phase: "upload",
+            message: event.percent >= 100 ? "上传完成，等待服务器质检..." : `正在上传 ZIP... ${event.percent}%`,
+            uploadPercent: event.percent,
+            current: prev?.current || 0,
+            total: prev?.total || 0,
+            elapsedMs,
+            latestSession: prev?.latestSession || null,
+          }));
+          return;
+        }
+        if (event.type === "phase") {
+          const phase =
+            event.phase === "extract" || event.phase === "discover" || event.phase === "checking"
+              ? event.phase
+              : "checking";
+          setQcZipProgress((prev) => ({
+            phase,
+            message: event.message,
+            uploadPercent: 100,
+            current: prev?.current || 0,
+            total: event.total ?? prev?.total ?? 0,
+            elapsedMs,
+            latestSession: prev?.latestSession || null,
+          }));
+          return;
+        }
+        if (event.type === "session") {
+          setQcZipProgress({
+            phase: "checking",
+            message: `正在质检 ${event.current}/${event.total}：${event.session.session_id}`,
+            uploadPercent: 100,
+            current: event.current,
+            total: event.total,
+            elapsedMs,
+            latestSession: event.session,
+          });
+          return;
+        }
+        if (event.type === "error") {
+          setMessage(event.detail);
+        }
+      });
+      const elapsedMs =
+        qcZipStartedAtRef.current != null ? Date.now() - qcZipStartedAtRef.current : 0;
       setQcZipResult(result);
+      setQcZipProgress({
+        phase: "done",
+        message: "质检完成",
+        uploadPercent: 100,
+        current: result.total,
+        total: result.total,
+        elapsedMs,
+        latestSession: null,
+      });
       setMessage(
         `ZIP 质检完成：共 ${result.total} 条，通过 ${result.pass_count}，未通过 ${result.fail_count}` +
-          (result.error_count > 0 ? `，错误 ${result.error_count}` : ""),
+          (result.error_count > 0 ? `，错误 ${result.error_count}` : "") +
+          `，耗时 ${formatElapsed(elapsedMs)}`,
       );
     } catch (err: unknown) {
-      const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+      const msg =
+        err instanceof Error
+          ? err.message
+          : (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
       setMessage(msg || "ZIP 质检失败");
+      setQcZipProgress(null);
     } finally {
       setQcZipChecking(false);
+      qcZipStartedAtRef.current = null;
     }
   };
 
@@ -683,6 +787,46 @@ export function AdminPage() {
             {qcZipChecking ? "质检中..." : "开始质检"}
           </button>
         </div>
+        {qcZipProgress && (
+          <div className="space-y-2 rounded-xl border border-white/10 bg-black/20 p-4">
+            <div className="flex flex-wrap items-center justify-between gap-2 text-sm text-slate-300">
+              <span>{qcZipProgress.message}</span>
+              <span className="text-xs text-slate-400">已用时 {formatElapsed(qcZipProgress.elapsedMs)}</span>
+            </div>
+            {qcZipProgress.phase === "upload" && qcZipProgress.uploadPercent != null && (
+              <div className="h-2 overflow-hidden rounded-full bg-white/10">
+                <div
+                  className="h-full rounded-full bg-cyan-400 transition-all duration-200"
+                  style={{ width: `${qcZipProgress.uploadPercent}%` }}
+                />
+              </div>
+            )}
+            {qcZipProgress.phase === "checking" && qcZipProgress.total > 0 && (
+              <div className="h-2 overflow-hidden rounded-full bg-white/10">
+                <div
+                  className="h-full rounded-full bg-cyan-400 transition-all duration-200"
+                  style={{
+                    width: `${Math.min(100, Math.round((qcZipProgress.current / qcZipProgress.total) * 100))}%`,
+                  }}
+                />
+              </div>
+            )}
+            {qcZipProgress.phase === "checking" && (
+              <div className="text-xs text-slate-500">
+                进度 {qcZipProgress.current}/{qcZipProgress.total}
+                {qcZipProgress.latestSession
+                  ? ` · 最近：${qcZipProgress.latestSession.status === "pass" ? "通过" : "未通过"} ${qcZipProgress.latestSession.session_id}`
+                  : ""}
+              </div>
+            )}
+            {(qcZipProgress.phase === "extract" || qcZipProgress.phase === "discover") && (
+              <div className="text-xs text-slate-500">服务器处理中，请稍候...</div>
+            )}
+            {qcZipProgress.phase === "done" && (
+              <div className="text-xs text-cyan-300">质检完成，总耗时 {formatElapsed(qcZipProgress.elapsedMs)}</div>
+            )}
+          </div>
+        )}
         {qcZipResult && (
           <div className="space-y-3">
             <div className="flex flex-wrap gap-3 text-sm">

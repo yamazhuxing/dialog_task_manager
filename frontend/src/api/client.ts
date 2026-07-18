@@ -258,12 +258,136 @@ export interface ZipQcResponse {
   sessions: ZipQcSessionResult[];
 }
 
-export async function qcExternalZip(file: File) {
-  const form = new FormData();
-  form.append("file", file);
-  const { data } = await api.post<ZipQcResponse>("/admin/qc-zip", form, {
-    headers: { "Content-Type": "multipart/form-data" },
-    timeout: 10 * 60 * 1000,
+export type ZipQcProgressEvent =
+  | { type: "upload"; percent: number }
+  | { type: "phase"; phase: string; message: string; total?: number }
+  | { type: "session"; current: number; total: number; session: ZipQcSessionResult }
+  | { type: "result"; result: ZipQcResponse }
+  | { type: "error"; detail: string };
+
+export function qcExternalZip(
+  file: File,
+  onEvent: (event: ZipQcProgressEvent) => void,
+): Promise<ZipQcResponse> {
+  return new Promise((resolve, reject) => {
+    const token = getToken();
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", "/api/admin/qc-zip");
+    if (token) {
+      xhr.setRequestHeader("Authorization", `Bearer ${token}`);
+    }
+    xhr.timeout = 30 * 60 * 1000;
+
+    xhr.upload.onprogress = (ev) => {
+      if (!ev.lengthComputable) return;
+      onEvent({
+        type: "upload",
+        percent: Math.min(100, Math.round((ev.loaded / ev.total) * 100)),
+      });
+    };
+
+    xhr.upload.onload = () => {
+      onEvent({ type: "upload", percent: 100 });
+    };
+
+    let settled = false;
+    let finalResult: ZipQcResponse | null = null;
+    let processedLen = 0;
+
+    const handleLine = (line: string) => {
+      const text = line.trim();
+      if (!text) return;
+      let event: Record<string, unknown>;
+      try {
+        event = JSON.parse(text) as Record<string, unknown>;
+      } catch {
+        return;
+      }
+      const eventType = event.type;
+      if (eventType === "phase") {
+        onEvent({
+          type: "phase",
+          phase: String(event.phase || ""),
+          message: String(event.message || ""),
+          total: typeof event.total === "number" ? event.total : undefined,
+        });
+      } else if (eventType === "session") {
+        onEvent({
+          type: "session",
+          current: Number(event.current || 0),
+          total: Number(event.total || 0),
+          session: event.session as ZipQcSessionResult,
+        });
+      } else if (eventType === "result") {
+        finalResult = event.result as ZipQcResponse;
+        onEvent({ type: "result", result: finalResult });
+      } else if (eventType === "error") {
+        const detail = String(event.detail || "质检失败");
+        onEvent({ type: "error", detail });
+        if (!settled) {
+          settled = true;
+          reject(new Error(detail));
+        }
+      }
+    };
+
+    const consume = () => {
+      const text = xhr.responseText;
+      const pending = text.slice(processedLen);
+      const parts = pending.split("\n");
+      const completeCount = pending.endsWith("\n") ? parts.length : Math.max(0, parts.length - 1);
+      for (let i = 0; i < completeCount; i += 1) {
+        handleLine(parts[i]);
+        processedLen += parts[i].length + 1;
+      }
+    };
+
+    xhr.onreadystatechange = () => {
+      if (xhr.readyState === XMLHttpRequest.LOADING || xhr.readyState === XMLHttpRequest.DONE) {
+        consume();
+      }
+    };
+
+    xhr.onload = () => {
+      consume();
+      if (settled) return;
+      if (xhr.status >= 400) {
+        settled = true;
+        let detail = `上传/质检失败（HTTP ${xhr.status}）`;
+        try {
+          const data = JSON.parse(xhr.responseText) as { detail?: string };
+          if (data.detail) detail = data.detail;
+        } catch {
+          // ignore
+        }
+        reject(new Error(detail));
+        return;
+      }
+      if (!finalResult) {
+        settled = true;
+        reject(new Error("质检未返回完整结果"));
+        return;
+      }
+      settled = true;
+      resolve(finalResult);
+    };
+
+    xhr.onerror = () => {
+      if (!settled) {
+        settled = true;
+        reject(new Error("网络错误，ZIP 质检中断"));
+      }
+    };
+
+    xhr.ontimeout = () => {
+      if (!settled) {
+        settled = true;
+        reject(new Error("质检超时，请缩小 ZIP 后重试"));
+      }
+    };
+
+    const form = new FormData();
+    form.append("file", file);
+    xhr.send(form);
   });
-  return data;
 }

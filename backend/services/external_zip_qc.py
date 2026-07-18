@@ -157,93 +157,113 @@ def _safe_extract_zip(zip_path: Path, dest: Path) -> None:
         zf.extractall(dest)
 
 
-def run_zip_quality_check(zip_path: Path) -> dict:
-    """
-    对与平台新版交付结构一致的 ZIP 执行质检。
+def _check_one_session(
+    source_type: str,
+    session_dir: Path,
+    scene_map: dict[str, str],
+) -> dict:
+    session_id = session_dir.name
+    extra_errors: list[str] = []
+    try:
+        ok, errors, stats = validate_session(session_dir)
+    except Exception as exc:
+        return {
+            "source_type": source_type,
+            "session_id": session_id,
+            "status": "error",
+            "errors": [str(exc)],
+            "thinking_effort": None,
+            "assistant_turns": None,
+            "difficulty": None,
+            "scene": scene_map.get(session_id),
+        }
 
-    期望结构：
-      session-scene.jsonl（可选）
-      openclaw/{session_id}/*.json
-      hermes/{session_id}/*.json
+    try:
+        from quality_check import load_session_calls
+
+        calls = load_session_calls(session_dir)
+        call_ids = {c.get("session_id") for c in calls if c.get("session_id")}
+        if call_ids and session_id not in call_ids:
+            extra_errors.append(f"目录名 '{session_id}' 与 call 内 session_id {call_ids} 不一致")
+        if len(call_ids) > 1:
+            extra_errors.append(f"call 内存在多个 session_id: {call_ids}")
+    except Exception:
+        pass
+
+    if scene_map and session_id not in scene_map:
+        extra_errors.append(f"{SESSION_SCENE_JSONL_NAME} 中缺少该 session_id")
+
+    difficulty, difficulty_errors = _validate_difficulty_justification(session_dir, session_id)
+    extra_errors.extend(difficulty_errors)
+
+    all_errors = list(errors) + extra_errors
+    status = "pass" if ok and not extra_errors else "fail"
+    return {
+        "source_type": source_type,
+        "session_id": session_id,
+        "status": status,
+        "errors": all_errors,
+        "thinking_effort": stats.get("thinking_effort"),
+        "assistant_turns": stats.get("assistant_turns"),
+        "difficulty": difficulty,
+        "scene": scene_map.get(session_id),
+    }
+
+
+def iter_zip_quality_check(zip_path: Path):
+    """
+    流式质检：依次产出 phase / session / result / error 事件（dict）。
     """
     if not zip_path.is_file():
-        raise ZipQcError("上传文件不存在")
+        yield {"type": "error", "detail": "上传文件不存在"}
+        return
     if not zipfile.is_zipfile(zip_path):
-        raise ZipQcError("上传文件不是合法 ZIP")
+        yield {"type": "error", "detail": "上传文件不是合法 ZIP"}
+        return
 
     work_dir = Path(tempfile.mkdtemp(prefix="zip_qc_"))
     try:
+        yield {"type": "phase", "phase": "extract", "message": "正在解压 ZIP..."}
         extract_dir = work_dir / "extract"
         extract_dir.mkdir(parents=True, exist_ok=True)
         try:
             _safe_extract_zip(zip_path, extract_dir)
-        except zipfile.BadZipFile as exc:
-            raise ZipQcError("ZIP 文件损坏或无法解压") from exc
+        except zipfile.BadZipFile:
+            yield {"type": "error", "detail": "ZIP 文件损坏或无法解压"}
+            return
+        except ZipQcError as exc:
+            yield {"type": "error", "detail": str(exc)}
+            return
 
+        yield {"type": "phase", "phase": "discover", "message": "正在扫描 session 目录..."}
         root = _resolve_delivery_root(extract_dir)
         scene_map, structure_warnings = _read_session_scene_map(root)
         sessions = _discover_sessions(root)
         if not sessions:
-            raise ZipQcError(
-                "未找到可质检的 session 目录，请确认 ZIP 含 openclaw/ 或 hermes/ 下的 call 样本"
-            )
+            yield {
+                "type": "error",
+                "detail": "未找到可质检的 session 目录，请确认 ZIP 含 openclaw/ 或 hermes/ 下的 call 样本",
+            }
+            return
+
+        total = len(sessions)
+        yield {
+            "type": "phase",
+            "phase": "checking",
+            "message": f"开始质检，共 {total} 个 session",
+            "total": total,
+        }
 
         results: list[dict] = []
-        for source_type, session_dir in sessions:
-            session_id = session_dir.name
-            extra_errors: list[str] = []
-            try:
-                ok, errors, stats = validate_session(session_dir)
-            except Exception as exc:
-                results.append(
-                    {
-                        "source_type": source_type,
-                        "session_id": session_id,
-                        "status": "error",
-                        "errors": [str(exc)],
-                        "thinking_effort": None,
-                        "assistant_turns": None,
-                        "difficulty": None,
-                        "scene": scene_map.get(session_id),
-                    }
-                )
-                continue
-
-            # 目录名应与 call 内 session_id 一致
-            try:
-                from quality_check import load_session_calls
-
-                calls = load_session_calls(session_dir)
-                call_ids = {c.get("session_id") for c in calls if c.get("session_id")}
-                if call_ids and session_id not in call_ids:
-                    extra_errors.append(
-                        f"目录名 '{session_id}' 与 call 内 session_id {call_ids} 不一致"
-                    )
-                if len(call_ids) > 1:
-                    extra_errors.append(f"call 内存在多个 session_id: {call_ids}")
-            except Exception:
-                pass
-
-            if scene_map and session_id not in scene_map:
-                extra_errors.append(f"{SESSION_SCENE_JSONL_NAME} 中缺少该 session_id")
-
-            difficulty, difficulty_errors = _validate_difficulty_justification(session_dir, session_id)
-            extra_errors.extend(difficulty_errors)
-
-            all_errors = list(errors) + extra_errors
-            status = "pass" if ok and not extra_errors else "fail"
-            results.append(
-                {
-                    "source_type": source_type,
-                    "session_id": session_id,
-                    "status": status,
-                    "errors": all_errors,
-                    "thinking_effort": stats.get("thinking_effort"),
-                    "assistant_turns": stats.get("assistant_turns"),
-                    "difficulty": difficulty,
-                    "scene": scene_map.get(session_id),
-                }
-            )
+        for idx, (source_type, session_dir) in enumerate(sessions, start=1):
+            item = _check_one_session(source_type, session_dir, scene_map)
+            results.append(item)
+            yield {
+                "type": "session",
+                "current": idx,
+                "total": total,
+                "session": item,
+            }
 
         found_ids = {item["session_id"] for item in results}
         for sid in sorted(set(scene_map) - found_ids):
@@ -254,14 +274,37 @@ def run_zip_quality_check(zip_path: Path) -> dict:
         pass_count = sum(1 for r in results if r["status"] == "pass")
         fail_count = sum(1 for r in results if r["status"] == "fail")
         error_count = sum(1 for r in results if r["status"] == "error")
-        return {
-            "filename": zip_path.name,
-            "total": len(results),
-            "pass_count": pass_count,
-            "fail_count": fail_count,
-            "error_count": error_count,
-            "structure_warnings": structure_warnings,
-            "sessions": results,
+        yield {
+            "type": "result",
+            "result": {
+                "filename": zip_path.name,
+                "total": len(results),
+                "pass_count": pass_count,
+                "fail_count": fail_count,
+                "error_count": error_count,
+                "structure_warnings": structure_warnings,
+                "sessions": results,
+            },
         }
     finally:
         shutil.rmtree(work_dir, ignore_errors=True)
+
+
+def run_zip_quality_check(zip_path: Path) -> dict:
+    """
+    对与平台新版交付结构一致的 ZIP 执行质检。
+
+    期望结构：
+      session-scene.jsonl（可选）
+      openclaw/{session_id}/*.json
+      hermes/{session_id}/*.json
+    """
+    final: dict | None = None
+    for event in iter_zip_quality_check(zip_path):
+        if event.get("type") == "error":
+            raise ZipQcError(str(event.get("detail") or "质检失败"))
+        if event.get("type") == "result":
+            final = event.get("result")
+    if not final:
+        raise ZipQcError("质检未返回结果")
+    return final

@@ -24,7 +24,6 @@ from backend.schemas import (
     DifficultyRetryResponse,
     InvalidDifficultySampleItem,
     UserStatsItem,
-    ZipQcResponse,
 )
 from backend.services.pipeline import (
     PipelineError,
@@ -56,7 +55,7 @@ from backend.services.questions import (
     load_questions_file,
 )
 from backend.services.difficulty import DifficultyError, list_invalid_difficulty_samples, rerate_passed_sample
-from backend.services.external_zip_qc import ZipQcError, run_zip_quality_check
+from backend.services.external_zip_qc import iter_zip_quality_check
 from backend.services.tasks import (
     claim_task,
     delete_task,
@@ -531,12 +530,14 @@ def download_v2_delivery_zip(
     )
 
 
-@router.post("/admin/qc-zip", response_model=ZipQcResponse)
+@router.post("/admin/qc-zip")
 async def qc_external_delivery_zip(
     file: UploadFile = File(...),
     _: User = Depends(require_admin),
-) -> ZipQcResponse:
-    """上传与平台新版交付结构一致的 ZIP，对其中 hermes/openclaw session 执行质检。"""
+):
+    """上传 ZIP 并流式返回质检进度（NDJSON：phase / session / result / error）。"""
+    from fastapi.responses import StreamingResponse
+
     filename = file.filename or "upload.zip"
     if not filename.lower().endswith(".zip"):
         raise HTTPException(status_code=400, detail="请上传 .zip 文件")
@@ -545,18 +546,28 @@ async def qc_external_delivery_zip(
     qc_dir.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     dest = qc_dir / f"{timestamp}_{Path(filename).name}"
+
     try:
         with dest.open("wb") as out:
             shutil.copyfileobj(file.file, out)
-        result = run_zip_quality_check(dest)
-    except ZipQcError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"质检失败: {exc}") from exc
-    finally:
         dest.unlink(missing_ok=True)
+        raise HTTPException(status_code=500, detail=f"保存上传文件失败: {exc}") from exc
 
-    return ZipQcResponse(**result)
+    def event_stream():
+        try:
+            for event in iter_zip_quality_check(dest):
+                yield json.dumps(event, ensure_ascii=False) + "\n"
+        except Exception as exc:
+            yield json.dumps({"type": "error", "detail": f"质检失败: {exc}"}, ensure_ascii=False) + "\n"
+        finally:
+            dest.unlink(missing_ok=True)
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="application/x-ndjson",
+        headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"},
+    )
 
 
 @router.get("/admin/difficulty-repairs", response_model=list[InvalidDifficultySampleItem])
