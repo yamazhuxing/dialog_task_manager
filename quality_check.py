@@ -32,6 +32,12 @@ SPECIAL_KEYWORDS = ["HEARTBEAT_OK", "NO_REPLY", "heartbeat poll", "[OpenClaw hea
 # 合法的 thinking_effort（甲方 2026-07 起不再接受 high）
 VALID_EFFORTS = ["xhigh", "max"]
 
+# session 目录中非 call 的元数据文件，质检时跳过
+NON_CALL_FILENAMES = {
+    "task_difficulty_justification.json",
+    "sample_metadata.json",
+}
+
 
 def load_session_calls(session_dir):
     """
@@ -46,10 +52,14 @@ def load_session_calls(session_dir):
     json_files = sorted(session_dir.glob("*.json"))
     
     for json_file in json_files:
+        if json_file.name in NON_CALL_FILENAMES:
+            continue
         try:
             with open(json_file, "r", encoding="utf-8") as f:
                 call = json.load(f)
-                calls.append(call)
+            if not isinstance(call, dict) or "request" not in call:
+                continue
+            calls.append(call)
         except Exception as e:
             print(f"  [警告] 无法加载 {json_file.name}: {e}")
     

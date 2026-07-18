@@ -194,3 +194,24 @@ class DifficultyRetryResponse(BaseModel):
     difficulty: str
     justification: str | None = None
     message: str
+
+
+class ZipQcSessionResult(BaseModel):
+    source_type: str
+    session_id: str
+    status: str
+    errors: list[str] = []
+    thinking_effort: str | None = None
+    assistant_turns: int | None = None
+    difficulty: str | None = None
+    scene: str | None = None
+
+
+class ZipQcResponse(BaseModel):
+    filename: str
+    total: int
+    pass_count: int
+    fail_count: int
+    error_count: int
+    structure_warnings: list[str] = []
+    sessions: list[ZipQcSessionResult] = []

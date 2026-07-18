@@ -15,6 +15,7 @@ wheels/
 data/uploads/**
 data/samples/**
 data/backups/**
+data/qc_uploads/**
 !data/uploads/.gitkeep
 !data/samples/.gitkeep
 !data/backups/.gitkeep

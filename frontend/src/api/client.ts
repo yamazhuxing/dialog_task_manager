@@ -236,3 +236,34 @@ export async function retryTaskDifficulty(taskId: number) {
   const { data } = await api.post(`/tasks/${taskId}/retry-difficulty`);
   return data;
 }
+
+export interface ZipQcSessionResult {
+  source_type: string;
+  session_id: string;
+  status: string;
+  errors: string[];
+  thinking_effort: string | null;
+  assistant_turns: number | null;
+  difficulty: string | null;
+  scene: string | null;
+}
+
+export interface ZipQcResponse {
+  filename: string;
+  total: number;
+  pass_count: number;
+  fail_count: number;
+  error_count: number;
+  structure_warnings: string[];
+  sessions: ZipQcSessionResult[];
+}
+
+export async function qcExternalZip(file: File) {
+  const form = new FormData();
+  form.append("file", file);
+  const { data } = await api.post<ZipQcResponse>("/admin/qc-zip", form, {
+    headers: { "Content-Type": "multipart/form-data" },
+    timeout: 10 * 60 * 1000,
+  });
+  return data;
+}

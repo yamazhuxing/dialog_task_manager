@@ -24,6 +24,7 @@ from backend.schemas import (
     DifficultyRetryResponse,
     InvalidDifficultySampleItem,
     UserStatsItem,
+    ZipQcResponse,
 )
 from backend.services.pipeline import (
     PipelineError,
@@ -55,6 +56,7 @@ from backend.services.questions import (
     load_questions_file,
 )
 from backend.services.difficulty import DifficultyError, list_invalid_difficulty_samples, rerate_passed_sample
+from backend.services.external_zip_qc import ZipQcError, run_zip_quality_check
 from backend.services.tasks import (
     claim_task,
     delete_task,
@@ -527,6 +529,34 @@ def download_v2_delivery_zip(
         media_type="application/zip",
         headers={"Cache-Control": "no-store"},
     )
+
+
+@router.post("/admin/qc-zip", response_model=ZipQcResponse)
+async def qc_external_delivery_zip(
+    file: UploadFile = File(...),
+    _: User = Depends(require_admin),
+) -> ZipQcResponse:
+    """上传与平台新版交付结构一致的 ZIP，对其中 hermes/openclaw session 执行质检。"""
+    filename = file.filename or "upload.zip"
+    if not filename.lower().endswith(".zip"):
+        raise HTTPException(status_code=400, detail="请上传 .zip 文件")
+
+    qc_dir = settings.data_dir / "qc_uploads"
+    qc_dir.mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    dest = qc_dir / f"{timestamp}_{Path(filename).name}"
+    try:
+        with dest.open("wb") as out:
+            shutil.copyfileobj(file.file, out)
+        result = run_zip_quality_check(dest)
+    except ZipQcError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"质检失败: {exc}") from exc
+    finally:
+        dest.unlink(missing_ok=True)
+
+    return ZipQcResponse(**result)
 
 
 @router.get("/admin/difficulty-repairs", response_model=list[InvalidDifficultySampleItem])

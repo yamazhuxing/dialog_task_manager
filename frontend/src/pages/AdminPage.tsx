@@ -9,8 +9,10 @@ import {
   getToken,
   importQuestionsFile,
   InvalidDifficultySample,
+  qcExternalZip,
   retryTaskDifficulty,
   SceneOption,
+  ZipQcResponse,
 } from "../api/client";
 
 interface UserStat {
@@ -73,6 +75,10 @@ export function AdminPage() {
   const [deletingTask, setDeletingTask] = useState(false);
   const [difficultyRepairs, setDifficultyRepairs] = useState<InvalidDifficultySample[]>([]);
   const [retryingDifficultyTaskId, setRetryingDifficultyTaskId] = useState<number | null>(null);
+  const [qcZipFile, setQcZipFile] = useState<File | null>(null);
+  const [qcZipChecking, setQcZipChecking] = useState(false);
+  const [qcZipResult, setQcZipResult] = useState<ZipQcResponse | null>(null);
+  const qcZipInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     loadUserStats(setUserStats);
@@ -292,6 +298,43 @@ export function AdminPage() {
 
   const onDownloadV2Zip = () =>
     downloadDeliveryZip("/api/delivery/v2-zip", "delivery_v2", "新版交付 ZIP ");
+
+  const onPickQcZip = (file: File | null) => {
+    if (!file) return;
+    if (!file.name.toLowerCase().endsWith(".zip")) {
+      setMessage("请选择 .zip 格式的样本包");
+      return;
+    }
+    setQcZipFile(file);
+    setQcZipResult(null);
+    setMessage("");
+  };
+
+  const clearQcZip = () => {
+    setQcZipFile(null);
+    setQcZipResult(null);
+    if (qcZipInputRef.current) qcZipInputRef.current.value = "";
+  };
+
+  const onQcZip = async () => {
+    if (!qcZipFile || qcZipChecking) return;
+    setQcZipChecking(true);
+    setMessage("");
+    setQcZipResult(null);
+    try {
+      const result = await qcExternalZip(qcZipFile);
+      setQcZipResult(result);
+      setMessage(
+        `ZIP 质检完成：共 ${result.total} 条，通过 ${result.pass_count}，未通过 ${result.fail_count}` +
+          (result.error_count > 0 ? `，错误 ${result.error_count}` : ""),
+      );
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+      setMessage(msg || "ZIP 质检失败");
+    } finally {
+      setQcZipChecking(false);
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -599,6 +642,110 @@ export function AdminPage() {
               <button className="btn btn-primary" onClick={onImportFile} disabled={importing}>
                 {importing ? "导入中..." : "确认导入"}
               </button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div className="card space-y-4">
+        <h2 className="font-medium">第三方 ZIP 样本质检</h2>
+        <p className="text-sm text-slate-400">
+          上传与平台「新版交付 ZIP」同结构的包：可选 session-scene.jsonl，以及 openclaw/、hermes/ 下的 session
+          目录。按平台同一套质检规则检测（模型仅 Opus 4.6/4.8，thinking 仅 xhigh/max；难度须为
+          low/medium/high/xhigh/expert，否则判失败），用于非平台生产样本验收。
+        </p>
+        <input
+          ref={qcZipInputRef}
+          type="file"
+          accept=".zip,application/zip"
+          className="hidden"
+          onChange={(e) => onPickQcZip(e.target.files?.[0] || null)}
+        />
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            className="btn btn-secondary"
+            onClick={() => qcZipInputRef.current?.click()}
+            disabled={qcZipChecking}
+          >
+            选择 ZIP
+          </button>
+          {qcZipFile && (
+            <span className="text-sm text-slate-300">
+              {qcZipFile.name}（{formatFileSize(qcZipFile.size)}）
+            </span>
+          )}
+          {qcZipFile && (
+            <button className="btn btn-secondary px-3 py-1 text-xs" onClick={clearQcZip} disabled={qcZipChecking}>
+              清除
+            </button>
+          )}
+          <button className="btn btn-primary" onClick={onQcZip} disabled={!qcZipFile || qcZipChecking}>
+            {qcZipChecking ? "质检中..." : "开始质检"}
+          </button>
+        </div>
+        {qcZipResult && (
+          <div className="space-y-3">
+            <div className="flex flex-wrap gap-3 text-sm">
+              <span className="text-slate-300">合计 {qcZipResult.total}</span>
+              <span className="text-cyan-300">通过 {qcZipResult.pass_count}</span>
+              <span className="text-red-300">未通过 {qcZipResult.fail_count}</span>
+              {qcZipResult.error_count > 0 && (
+                <span className="text-amber-300">错误 {qcZipResult.error_count}</span>
+              )}
+            </div>
+            {qcZipResult.structure_warnings.length > 0 && (
+              <div className="rounded-xl border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
+                {qcZipResult.structure_warnings.map((w) => (
+                  <div key={w}>{w}</div>
+                ))}
+              </div>
+            )}
+            <div className="overflow-x-auto rounded-xl border border-white/10">
+              <table className="w-full min-w-[720px] text-left text-sm">
+                <thead className="bg-white/5 text-xs text-slate-400">
+                  <tr>
+                    <th className="px-3 py-2 font-medium">来源</th>
+                    <th className="px-3 py-2 font-medium">session_id</th>
+                    <th className="px-3 py-2 font-medium">场景</th>
+                    <th className="px-3 py-2 font-medium">effort</th>
+                    <th className="px-3 py-2 font-medium">难度</th>
+                    <th className="px-3 py-2 font-medium">轮次</th>
+                    <th className="px-3 py-2 font-medium">结果</th>
+                    <th className="px-3 py-2 font-medium">原因</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-white/5">
+                  {qcZipResult.sessions.map((item) => (
+                    <tr key={`${item.source_type}-${item.session_id}`}>
+                      <td className="px-3 py-2">{item.source_type}</td>
+                      <td className="px-3 py-2 font-mono text-xs">{item.session_id}</td>
+                      <td className="px-3 py-2 text-slate-400">{item.scene || "—"}</td>
+                      <td className="px-3 py-2">{item.thinking_effort || "—"}</td>
+                      <td className="px-3 py-2">{item.difficulty || "—"}</td>
+                      <td className="px-3 py-2">{item.assistant_turns ?? "—"}</td>
+                      <td className="px-3 py-2">
+                        <span
+                          className={`badge ${
+                            item.status === "pass"
+                              ? "badge-passed"
+                              : item.status === "error"
+                                ? "bg-amber-500/20 text-amber-300"
+                                : "bg-red-500/20 text-red-300"
+                          }`}
+                        >
+                          {item.status === "pass" ? "通过" : item.status === "error" ? "错误" : "未通过"}
+                        </span>
+                      </td>
+                      <td className="max-w-md px-3 py-2 text-xs text-slate-400">
+                        {item.errors.length === 0
+                          ? "—"
+                          : item.errors.slice(0, 3).join("；") +
+                            (item.errors.length > 3 ? `…(+${item.errors.length - 3})` : "")}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           </div>
         )}
